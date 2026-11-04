@@ -758,8 +758,7 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 5px 6px;
-  margin-left: -6px;
+  padding: 5px 0;
   border: 0;
   background: transparent;
   font-weight: inherit;
@@ -933,12 +932,10 @@ body,
   align-items: center;
   gap: 3px;
   min-width: 0;
+  flex: 1;
 }
 .canvas-name > .icon-button {
   flex-shrink: 0;
-}
-.canvas-name {
-  flex: 1;
 }
 .canvas-name h1 {
   flex: 0 1 auto;

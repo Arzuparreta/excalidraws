@@ -536,6 +536,11 @@ test('sidebar pencils share a live name draft with the topbar without moving fil
   await input.press('Enter');
   await expect(page.getByRole('button', { name: 'Inactive rename', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Another canvas', exact: true })).toBeVisible();
+  expect(
+    await page
+      .locator('.title-button')
+      .evaluate((button) => button.scrollWidth <= button.clientWidth),
+  ).toBe(true);
   await page.screenshot({ path: 'test-results/shared-name-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Open explorer', exact: true }).click();
