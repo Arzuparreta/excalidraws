@@ -9,14 +9,17 @@ import {
 } from '@excalidraw/excalidraw';
 import type { ExcalidrawProps, ExcalidrawInitialDataState } from '@excalidraw/excalidraw/types';
 import type { Scene } from '../../shared/model';
+import type { ColorTheme } from '../workspace/theme';
 import '@excalidraw/excalidraw/index.css';
 
 export interface EditorHandle {
   flush(): void;
+  setTheme(theme: ColorTheme): void;
   destroy(): void;
 }
 export interface EditorOptions {
   scene: Scene;
+  theme: ColorTheme;
   onChange(scene: Scene): void;
   onImport(): void;
   onPending(pending: boolean): void;
@@ -28,7 +31,8 @@ export function mountEditor(container: HTMLElement, options: EditorOptions): Edi
   const root = createRoot(container);
   let flush = () => {};
   let destroyed = false;
-  function Editor() {
+  let theme = options.theme;
+  function Editor(props: { theme: ColorTheme }) {
     const previous = useRef<{ signature: string; viewport: string; files: unknown }>();
     const pending = useRef<Parameters<NonNullable<ExcalidrawProps['onChange']>>>();
     const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -92,7 +96,8 @@ export function mountEditor(container: HTMLElement, options: EditorOptions): Edi
         onChange: change,
         onPointerUp: () => flush(),
         langCode: 'en',
-        UIOptions: { canvasActions: { loadScene: false } },
+        theme: props.theme,
+        UIOptions: { canvasActions: { loadScene: false, toggleTheme: false } },
       },
       h(
         MainMenu,
@@ -107,9 +112,15 @@ export function mountEditor(container: HTMLElement, options: EditorOptions): Edi
       ),
     );
   }
-  root.render(h(Editor));
+  const render = () => root.render(h(Editor, { theme }));
+  render();
   return {
     flush: () => flush(),
+    setTheme: (value) => {
+      if (destroyed || theme === value) return;
+      theme = value;
+      render();
+    },
     destroy: () => {
       destroyed = true;
       root.unmount();

@@ -39,6 +39,7 @@ import {
   Pencil,
   RotateCcw,
   Search,
+  Settings,
   SlidersHorizontal,
   Star,
   StarOff,
@@ -53,6 +54,7 @@ import { createWorkspace } from './controller';
 import { InlineName } from './InlineName';
 import { MovePicker } from './MovePicker';
 import { Popover, type DismissReason } from './Popover';
+import { createTheme, themeOptions } from './theme';
 import {
   ancestors,
   buildRows,
@@ -132,6 +134,7 @@ type Pop = { anchor: HTMLElement; point?: Point; layer: Layer; restore(): void }
   | { kind: 'row'; path: string }
   | { kind: 'create'; folder: string }
   | { kind: 'sort' }
+  | { kind: 'settings' }
   | { kind: 'move'; paths: string[] }
   | { kind: 'document' }
   | { kind: 'history' }
@@ -174,6 +177,7 @@ function MenuItem(props: {
 }
 
 export function Workspace() {
+  const theme = createTheme();
   const w = createWorkspace();
   const drawerMode = media(DRAWER_QUERY);
   const coarse = media(COARSE_QUERY);
@@ -637,6 +641,11 @@ export function Workspace() {
     if ((await commit()) === undefined) return;
     setPop({ kind: 'sort', anchor, layer: 'sidebar', restore: elementRestore(anchor) });
   };
+  const openSettings = async (anchor: HTMLElement) => {
+    if (pop()?.kind === 'settings') return closePop(true);
+    if ((await commit()) === undefined) return;
+    setPop({ kind: 'settings', anchor, layer: 'sidebar', restore: elementRestore(anchor) });
+  };
   const openDocumentMenu = async (anchor: HTMLElement) => {
     if (pop()?.kind === 'document') return closePop(true);
     if ((await commit()) === undefined) return;
@@ -1043,6 +1052,33 @@ export function Workspace() {
             </>
           ),
         };
+      case 'settings':
+        return {
+          label: 'Settings',
+          role: 'menu',
+          body: (
+            <>
+              <p class="popover-title" id="theme-label">
+                Theme
+              </p>
+              <div role="group" aria-labelledby="theme-label">
+                <For each={themeOptions}>
+                  {(option) => (
+                    <MenuItem
+                      radio
+                      checked={theme.preference() === option.value}
+                      label={option.label}
+                      onSelect={() => {
+                        theme.setPreference(option.value);
+                        closePop(true);
+                      }}
+                    />
+                  )}
+                </For>
+              </div>
+            </>
+          ),
+        };
       case 'move':
         return {
           label: 'Move to folder',
@@ -1083,7 +1119,8 @@ export function Workspace() {
             label={content.label}
             role={content.role}
             class={`popover-${current.kind}`}
-            align={current.kind === 'create' ? 'start' : 'end'}
+            id={current.kind === 'settings' ? 'settings-menu' : undefined}
+            align={current.kind === 'create' || current.kind === 'settings' ? 'start' : 'end'}
             onDismiss={dismissPop}
           >
             {content.body}
@@ -1412,80 +1449,83 @@ export function Workspace() {
             <ArrowUpFromLine size={17} />
           </button>
         </div>
-        <div
-          class="view-tabs"
-          role="tablist"
-          aria-label="Explorer views"
-          onKeyDown={(event) => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-            event.preventDefault();
-            const tabs = [
-              ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
-            ];
-            const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
-            const next =
-              event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? tabs.length - 1
-                  : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-            tabs[next]?.focus();
-            tabs[next]?.click();
-          }}
-        >
-          <For each={views}>
-            {(item) => (
+        <div class="explorer-navigation">
+          <div
+            class="view-tabs"
+            role="tablist"
+            aria-label="Explorer views"
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const tabs = [
+                ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+              ];
+              const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
+              const next =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? tabs.length - 1
+                    : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+              tabs[next]?.focus();
+              tabs[next]?.click();
+            }}
+          >
+            <For each={views}>
+              {(item) => (
+                <button
+                  type="button"
+                  role="tab"
+                  id={`view-tab-${item.id}`}
+                  class="view-tab"
+                  aria-label={item.label}
+                  aria-selected={view() === item.id && !searching()}
+                  aria-controls="explorer-panel"
+                  tabIndex={view() === item.id ? 0 : -1}
+                  title={item.label}
+                  data-name-transition
+                  onClick={() => committed(() => chooseView(item.id))}
+                >
+                  {item.icon()}
+                  <span>{item.label}</span>
+                </button>
+              )}
+            </For>
+          </div>
+          <div class="list-header">
+            <span class="list-title">{listTitle()}</span>
+            <span class="entry-count">{listCount()}</span>
+            <Show when={!showTrashList()}>
               <button
                 type="button"
-                role="tab"
-                id={`view-tab-${item.id}`}
-                class="view-tab"
-                aria-selected={view() === item.id && !searching()}
-                aria-controls="explorer-panel"
-                tabIndex={view() === item.id ? 0 : -1}
-                title={item.label}
-                data-name-transition
-                onClick={() => committed(() => chooseView(item.id))}
+                class="icon-button"
+                aria-label="Select items"
+                title="Select items"
+                aria-pressed={selecting()}
+                onClick={() => (selecting() ? clearSelection() : setSelectMode(true))}
               >
-                {item.icon()}
-                <span>{item.label}</span>
+                <ListChecks size={16} />
               </button>
-            )}
-          </For>
-        </div>
-        <div class="list-header">
-          <span class="list-title">{listTitle()}</span>
-          <span class="entry-count">{listCount()}</span>
-          <Show when={!showTrashList()}>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Select items"
-              title="Select items"
-              aria-pressed={selecting()}
-              onClick={() => (selecting() ? clearSelection() : setSelectMode(true))}
-            >
-              <ListChecks size={16} />
-            </button>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Sort canvases"
-              title={`Sort canvases · ${sortOptions.find((option) => option.value === sort())!.label}`}
-              aria-haspopup="menu"
-              aria-expanded={pop()?.kind === 'sort'}
-              data-menu-trigger
-              onClick={(event) => void openSort(event.currentTarget)}
-              onKeyDown={(event) => {
-                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                  event.preventDefault();
-                  void openSort(event.currentTarget);
-                }
-              }}
-            >
-              <SlidersHorizontal size={15} />
-            </button>
-          </Show>
+              <button
+                type="button"
+                class="icon-button"
+                aria-label="Sort canvases"
+                title={`Sort canvases · ${sortOptions.find((option) => option.value === sort())!.label}`}
+                aria-haspopup="menu"
+                aria-expanded={pop()?.kind === 'sort'}
+                data-menu-trigger
+                onClick={(event) => void openSort(event.currentTarget)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    void openSort(event.currentTarget);
+                  }
+                }}
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+            </Show>
+          </div>
         </div>
         <div
           id="explorer-panel"
@@ -1695,11 +1735,28 @@ export function Workspace() {
             </button>
           </div>
         </Show>
-        <Show when={sidebarVisible()}>
-          <div class="explorer-messages">
-            <Messages />
+        <div class="sidebar-bottom">
+          <Show when={sidebarVisible()}>
+            <div class="explorer-messages">
+              <Messages />
+            </div>
+          </Show>
+          <div class="sidebar-footer">
+            <button
+              type="button"
+              class="settings-button"
+              aria-label="Settings"
+              aria-haspopup="menu"
+              aria-expanded={pop()?.kind === 'settings'}
+              aria-controls={pop()?.kind === 'settings' ? 'settings-menu' : undefined}
+              data-name-transition
+              onClick={(event) => void openSettings(event.currentTarget)}
+            >
+              <Settings size={16} />
+              <span>Settings</span>
+            </button>
           </div>
-        </Show>
+        </div>
         <div class="popover-layer">{renderPop('sidebar')}</div>
       </aside>
       <main class="main-area" inert={drawerMode() && drawerOpen()}>
@@ -1966,6 +2023,7 @@ export function Workspace() {
             {(session) => (
               <EditorSurface
                 session={session}
+                theme={theme.resolved()}
                 onImport={() => w.importFiles()}
                 onReady={w.setEditor}
                 onPending={w.setEditorPending}

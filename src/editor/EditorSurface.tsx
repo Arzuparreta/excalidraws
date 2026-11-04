@@ -1,11 +1,13 @@
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import type { DocumentSession } from '../workspace/session';
+import type { ColorTheme } from '../workspace/theme';
 import type { EditorHandle } from './ExcalidrawAdapter';
 
 // Each document owns one mounted React island. Cleanup releases its scene, canvases,
 // image cache and subscriptions before Solid mounts another document.
 export function EditorSurface(props: {
   session: DocumentSession;
+  theme: ColorTheme;
   onImport(): void;
   onReady(handle: EditorHandle | undefined): void;
   onPending(pending: boolean): void;
@@ -15,12 +17,17 @@ export function EditorSurface(props: {
   let handle: EditorHandle | undefined;
   let disposed = false;
   const [loading, setLoading] = createSignal(true);
+  createEffect(() => {
+    const theme = props.theme;
+    handle?.setTheme(theme);
+  });
   onMount(async () => {
     try {
       const { mountEditor } = await import('./ExcalidrawAdapter');
       if (disposed) return;
       handle = mountEditor(container, {
         scene: props.session.initialScene,
+        theme: props.theme,
         onChange: props.session.change,
         onImport: props.onImport,
         onPending: props.onPending,
