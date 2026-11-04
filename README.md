@@ -105,38 +105,48 @@ links. There are no accounts or authentication: use loopback or a trusted privat
 Public deployments need authentication and HTTPS in front of the service.
 The document size limit is 40 MB.
 
-## User systemd service
+## System service
 
 The installer creates a release independent of the checkout, installs production dependencies,
-and enables `excalidraws.service`. Updates back up the previous unit and roll back if the
-frontend or API check fails. The vault stays outside the releases.
+and enables the system-wide `excalidraws.service` at boot. The process runs as the
+non-root account selected by `--service-user` (the invoking sudo user by default).
+Updates back up the previous unit and roll back if the frontend or API check fails. The vault stays outside the releases.
 
 ```sh
 npm run build
 node scripts/install-service.mjs --dry-run --host 0.0.0.0 --port 3000
 # Access from localhost, LAN, and Tailscale:
-node scripts/install-service.mjs --host 0.0.0.0 --port 3000
+sudo node scripts/install-service.mjs --host 0.0.0.0 --port 3000
 # To restrict access to localhost:
-# node scripts/install-service.mjs --port 3000
+# sudo node scripts/install-service.mjs --port 3000
 ```
 
-The default vault is `~/.local/share/excalidraws/vault`. The installer respects
-`XDG_DATA_HOME` and `XDG_CONFIG_HOME`. It does not change other services or Tailscale.
+The default port is 3000. The default vault is `.local/share/excalidraws/vault` inside
+the service account's home directory; releases are stored beside it. Use `--vault` to
+keep a custom vault location. When running directly as root or through pkexec, specify
+`--service-user username`. The installer never runs the server as root.
+
+Existing user services are backed up, stopped, and disabled before starting the system
+service. After a successful health check, the old user unit is removed. If activation
+fails, the previous system and user service states are restored. Migrate while the
+previous service user is logged in, and preserve its original `--host`, `--port`,
+`--vault`, `--allowed-hosts`, and `--origin` values. The installer does not move or
+rewrite drawings, change other services, or change Tailscale.
 
 ```sh
-systemctl --user status excalidraws
-systemctl --user restart excalidraws
-journalctl --user -u excalidraws -f
+systemctl status excalidraws
+sudo systemctl restart excalidraws
+journalctl -u excalidraws -f
 ```
 
-The service starts with the user session. To run it without an interactive session,
-enable user lingering if needed: `loginctl enable-linger "$USER"`.
+The service starts when the machine boots, independently of interactive logins.
+User lingering is not required.
 
-To roll back, copy a previous unit backup to `~/.config/systemd/user/excalidraws.service`,
-run `systemctl --user daemon-reload`, and restart the service.
+To roll back, copy a previous unit backup to `/etc/systemd/system/excalidraws.service`,
+run `sudo systemctl daemon-reload`, and restart the service.
 
-To uninstall, run `systemctl --user disable --now excalidraws`, remove the unit file,
-and run `systemctl --user daemon-reload`. You can remove the releases separately;
+To uninstall, run `sudo systemctl disable --now excalidraws`, remove the unit file,
+and run `sudo systemctl daemon-reload`. You can remove the releases separately;
 keep the vault to retain your drawings.
 
 ### Migration and backups
