@@ -2,17 +2,23 @@
 
 ## Goal
 
-Extend the official Excalidraw editor into a personal file workspace: a persistent left
+Extend the official Excalidraw editor into a personal file workspace: a collapsible left
 sidebar, folders, multiple canvases, automatic saving on the desktop, and access from other
 devices. The repository started empty; the editor remains an upstream dependency.
 
 ## Architecture
 
-- React and `@excalidraw/excalidraw`, with exact versions and a lockfile. Only the adapter
-  knows the editor API: `initialData`, `onChange`, and public serialization utilities.
+- Solid.js renders the workspace, navigation, virtualized sidebar, and dialogs. Vite builds
+  the application. Dependencies use exact versions and a lockfile.
+- `@excalidraw/excalidraw` remains the official React component. Only
+  `src/editor/ExcalidrawAdapter.tsx` knows its public API and React lifecycle. A lazy import
+  mounts one editor island and explicitly destroys it when switching documents.
 - `src/workspace`: the HTTP client, save lifecycle, and file explorer. The integration page
   simply mounts this module.
 - Node and Express serve the compiled application and a same-origin API.
+- A shared native filesystem watcher and server-sent events invalidate visible clients.
+  Hidden clients disconnect; focus and reconnection revalidate the open revision. No periodic
+  document polling or vault scanning runs in the browser. Graceful shutdown closes streams.
 - A configurable folder is the source of truth. Documents are standard `.excalidraw` JSON
   files with embedded images and viewport state. There is no database.
 - SHA-256 revisions and temporary-file writes followed by fsync and rename. A queue serializes
@@ -24,6 +30,14 @@ devices. The repository started empty; the editor remains an upstream dependency
 
 - Save after a short pause; also retain a local draft in IndexedDB.
 - Wait for saving before switching documents. Errors and conflicts keep the current drawing open.
+- Coalesce drawing snapshots outside input handlers and defer viewport serialization until
+  pan/zoom pauses. Group IndexedDB writes, bound save scheduling during continuous drawing,
+  and explicitly flush before switching, exporting, or hiding the page.
+- Cancel obsolete document reads and commit only the latest requested canvas. Keep navigation
+  history as paths rather than retaining inactive scenes. Undo history belongs to the one
+  active editor and resets when it is destroyed.
+- Use a compact sidebar with an active document card and a virtualized file list. On mobile,
+  make the drawer modal to keyboard/pointer interaction without keeping hidden controls active.
 - Reload external changes when the editor is clean. When local edits exist, retain the draft
   and offer to load the server version or save a copy.
 - Compare the draft's original revision when recovering after a page reload.

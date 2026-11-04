@@ -9,12 +9,19 @@ export class ApiError extends Error {
     super(message);
   }
 }
-async function request<T>(route: string, body?: unknown, method = 'POST'): Promise<T> {
+async function request<T>(
+  route: string,
+  body?: unknown,
+  method = 'POST',
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(`/api${route}`, {
     method: body === undefined ? 'GET' : method,
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(20_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(20_000)])
+      : AbortSignal.timeout(20_000),
   });
   const data = await response.json();
   if (!response.ok)
@@ -28,10 +35,11 @@ async function request<T>(route: string, body?: unknown, method = 'POST'): Promi
 const query = (path: string) => `?path=${encodeURIComponent(path)}`;
 export const api = {
   entries: () => request<Entry[]>('/entries'),
-  read: (path: string) => request<Document>(`/document${query(path)}`),
+  read: (path: string, signal?: AbortSignal) =>
+    request<Document>(`/document${query(path)}`, undefined, 'GET', signal),
   revision: (path: string) => request<{ revision: string }>(`/revision${query(path)}`),
   save: (path: string, revision: string, scene: Scene) =>
-    request<Document>('/document', { path, revision, scene }, 'PUT'),
+    request<{ revision: string }>('/document', { path, revision, scene }, 'PUT'),
   create: (path: string, kind: Entry['kind'], scene?: Scene) =>
     request<Document>('/entries', { path, kind, scene }),
   move: (from: string, to: string) => request('/move', { from, to }),

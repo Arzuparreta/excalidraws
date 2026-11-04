@@ -11,7 +11,8 @@ const vault = new Vault(root);
 await vault.init();
 const unlock = await vault.lock();
 const client = fileURLToPath(new URL('../client', import.meta.url));
-const server = createApp(vault, client).listen(port, host, () => {
+const app = createApp(vault, client);
+const server = app.listen(port, host, () => {
   console.log(`Excalidraws: http://${host}:${port} · vault ${vault.root}`);
 });
 server.on('error', async (error) => {
@@ -21,6 +22,7 @@ server.on('error', async (error) => {
 });
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
+    app.closeStreams();
     server.close(async () => {
       await unlock();
       process.exit(0);

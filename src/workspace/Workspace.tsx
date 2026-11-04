@@ -1,50 +1,49 @@
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type FormEvent,
-  type ReactNode,
-} from 'react';
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  untrack,
+  type JSX,
+} from 'solid-js';
 import {
   ArrowDownToLine,
+  ArrowLeft,
   ArrowRight,
   ArrowUpFromLine,
   Check,
   ChevronDown,
   ChevronRight,
-  Circle,
-  Clock3,
+  Ellipsis,
   FilePlus2,
   FileText,
   Folder,
-  FolderPlus,
   FolderOpen,
+  FolderPlus,
   History,
-  LayoutPanelLeft,
-  LoaderCircle,
-  Menu,
-  MoreHorizontal,
+  PanelLeft,
+  PanelLeftClose,
   Pencil,
-  Plus,
   Search,
-  Shapes,
+  SlidersHorizontal,
   Trash2,
-  Undo2,
   X,
-  TriangleAlert,
-} from 'lucide-react';
-import type { Document, Entry, HistoryEntry, Scene, TrashEntry } from '../../shared/model';
-import { api } from './api';
-import { drafts } from './drafts';
-import { DocumentSession, type SaveState } from './session';
-import { ExcalidrawAdapter, importScene } from '../editor/ExcalidrawAdapter';
+} from 'lucide-solid';
+import type { Entry } from '../../shared/model';
+import { EditorSurface } from '../editor/EditorSurface';
+import {
+  basename,
+  createWorkspace,
+  parent,
+  pathWithName,
+  readSetting,
+  saveSetting,
+  title,
+} from './controller';
 
-const basename = (path: string) => path.split('/').at(-1)!;
-const title = (path: string) => basename(path).replace(/\.excalidraw$/, '');
-const parent = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
-const join = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);
 const displayDate = (value: string) =>
   new Date(value).toLocaleString('en', {
     day: 'numeric',
@@ -52,944 +51,1454 @@ const displayDate = (value: string) =>
     hour: '2-digit',
     minute: '2-digit',
   });
-const safeRead = (key: string) => {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+const shortDate = (value: string) =>
+  new Date(value).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+const statusLabels = {
+  saved: 'Saved',
+  pending: 'Pending changes',
+  saving: 'Saving…',
+  offline: 'Not saved',
+  conflict: 'Conflict',
 };
-const remember = (key: string, value: string) => {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* Storage may be disabled. */
-  }
-};
-const emptyState: SaveState = { status: 'saved', dirty: false, message: '', localError: false };
 
-function Modal({
-  title,
-  children,
-  onClose,
-}: {
-  title: string;
-  children: ReactNode;
-  onClose(): void;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    ref.current?.showModal();
-  }, []);
+function Modal(props: { title: string; children: JSX.Element; onClose(): void }) {
+  let dialog!: HTMLDialogElement;
+  let previous: HTMLElement | null;
+  onMount(() => {
+    previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog.showModal();
+    dialog.querySelector<HTMLElement>('[autofocus]')?.focus();
+  });
+  onCleanup(() => {
+    dialog.close();
+    previous?.isConnected && previous.focus();
+  });
   return (
     <dialog
-      className="dialog"
-      ref={ref}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
+      class="dialog"
+      ref={dialog}
+      aria-label={props.title}
+      onCancel={(e) => {
+        e.preventDefault();
+        props.onClose();
       }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+      onClick={(e) => {
+        if (e.target === dialog) {
+          const box = dialog.getBoundingClientRect();
+          if (
+            e.clientX < box.left ||
+            e.clientX > box.right ||
+            e.clientY < box.top ||
+            e.clientY > box.bottom
+          )
+            props.onClose();
+        }
       }}
     >
-      <div className="dialog-heading">
-        <h2>{title}</h2>
-        <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
+      <div class="dialog-heading">
+        <h2>{props.title}</h2>
+        <button class="icon-button" aria-label="Close dialog" onClick={props.onClose}>
           <X size={18} />
         </button>
       </div>
-      {children}
+      {props.children}
     </dialog>
   );
 }
 
-type Prompt = {
-  mode: 'file' | 'folder' | 'rename' | 'move' | 'copy';
-  path?: string;
-  name: string;
-  folder: string;
-};
+type Row = { entry: Entry; depth: number; expanded: boolean };
+type RenameState = { path: string; name: string; error: string };
+
+function InlineName(props: {
+  value: RenameState;
+  label: string;
+  busy: boolean;
+  onInput(name: string): void;
+  onSave(restoreFocus: boolean): Promise<boolean>;
+  onCancel(): void;
+}) {
+  let form!: HTMLFormElement;
+  let input!: HTMLInputElement;
+  let blurTimer: ReturnType<typeof setTimeout> | undefined;
+  const save = async (restoreFocus: boolean) => {
+    const saved = await props.onSave(restoreFocus);
+    if (!saved && input.isConnected) input.focus();
+  };
+  onMount(() => {
+    input.focus();
+    input.select();
+  });
+  onCleanup(() => clearTimeout(blurTimer));
+  return (
+    <form
+      class="inline-name"
+      ref={form}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save(true);
+      }}
+      onFocusOut={(event) => {
+        const next = event.relatedTarget;
+        if (
+          next instanceof Element &&
+          next.closest(
+            '.file-select, .active-select, .title-button, [data-name-transition], [data-menu-trigger]',
+          )
+        )
+          return;
+        // Let a clicked workspace action finish the edit before its own operation.
+        blurTimer = setTimeout(() => {
+          if (form.isConnected && !form.contains(document.activeElement) && !props.busy)
+            void save(false);
+        }, 0);
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          props.onCancel();
+        }
+      }}
+    >
+      <input
+        ref={input}
+        aria-label={props.label}
+        aria-invalid={!!props.value.error}
+        aria-describedby={props.value.error ? 'rename-error' : undefined}
+        title="Enter to save · Escape to cancel"
+        maxLength={160}
+        value={props.value.name}
+        readOnly={props.busy}
+        onInput={(e) => props.onInput(e.currentTarget.value)}
+      />
+      <button
+        class="icon-button"
+        aria-label="Save name"
+        title="Save name · Enter"
+        disabled={props.busy}
+      >
+        <Check size={15} />
+      </button>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Cancel rename"
+        title="Cancel · Escape"
+        disabled={props.busy}
+        onClick={props.onCancel}
+      >
+        <X size={15} />
+      </button>
+      <Show when={props.value.error}>
+        <span id="rename-error" class="rename-error" role="alert">
+          {props.value.error}
+        </span>
+      </Show>
+    </form>
+  );
+}
+
+function FileList(props: {
+  rows: Row[];
+  active?: string;
+  search: string;
+  menuPath?: string;
+  selectedFolder: string;
+  renaming?: RenameState;
+  renderRename(): JSX.Element;
+  onRename(path: string): void;
+  onOpen(row: Row): void;
+  onMenu(entry: Entry, button: HTMLButtonElement): void;
+  loaded: boolean;
+}) {
+  const renamePath = createMemo(() => props.renaming?.path);
+  const renameError = createMemo(() => !!props.renaming?.error);
+  let list!: HTMLElement;
+  const [scroll, setScroll] = createSignal(0);
+  const [height, setHeight] = createSignal(600);
+  const rowHeight = 40;
+  const start = createMemo(() =>
+    Math.max(0, Math.min(Math.floor(scroll() / rowHeight) - 6, Math.max(0, props.rows.length - 1))),
+  );
+  const end = createMemo(() =>
+    Math.min(props.rows.length, start() + Math.ceil(height() / rowHeight) + 12),
+  );
+  const visible = createMemo(() => props.rows.slice(start(), end()));
+  createEffect(() => {
+    const path = renamePath();
+    const index = path ? props.rows.findIndex((row) => row.entry.path === path) : -1;
+    if (list && index >= 0) {
+      const top = index * rowHeight;
+      if (
+        top < list.scrollTop ||
+        top + rowHeight + (renameError() ? 65 : 0) > list.scrollTop + height()
+      ) {
+        list.scrollTop = Math.max(0, top - height() / 2);
+        setScroll(list.scrollTop);
+      }
+    }
+  });
+  createEffect(() => {
+    props.search;
+    if (list) {
+      list.scrollTop = 0;
+      setScroll(0);
+    }
+  });
+  onMount(() => {
+    const resize = new ResizeObserver(() => setHeight(list.clientHeight));
+    resize.observe(list);
+    onCleanup(() => resize.disconnect());
+  });
+  return (
+    <nav
+      class="file-list"
+      aria-label="Files"
+      ref={list}
+      onScroll={() => setScroll(list.scrollTop)}
+      style={{ 'padding-bottom': renameError() ? '70px' : undefined }}
+    >
+      <Show
+        when={props.rows.length}
+        fallback={
+          <p class="list-empty">
+            {!props.loaded
+              ? 'Loading canvases…'
+              : props.search
+                ? 'No matching canvases.'
+                : props.active
+                  ? 'No other canvases.'
+                  : 'No canvases yet.'}
+          </p>
+        }
+      >
+        <div style={{ height: `${start() * rowHeight}px` }} aria-hidden="true" />
+        <For each={visible()}>
+          {(row) => (
+            <div
+              class="file-row"
+              classList={{
+                'folder-selected':
+                  row.entry.kind === 'folder' && props.selectedFolder === row.entry.path,
+                'is-renaming': renamePath() === row.entry.path,
+              }}
+              data-entry-path={row.entry.path}
+              style={{ 'padding-left': `${8 + Math.min(row.depth, 7) * 14}px` }}
+            >
+              <Show
+                when={renamePath() === row.entry.path}
+                fallback={
+                  <>
+                    <button
+                      class="file-select"
+                      title={row.entry.path}
+                      aria-label={
+                        row.entry.kind === 'folder'
+                          ? basename(row.entry.path)
+                          : title(row.entry.path)
+                      }
+                      aria-expanded={row.entry.kind === 'folder' ? row.expanded : undefined}
+                      onClick={() => props.onOpen(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'F2') {
+                          e.preventDefault();
+                          props.onRename(row.entry.path);
+                        }
+                      }}
+                    >
+                      <Show when={row.entry.kind === 'folder'} fallback={<FileText size={16} />}>
+                        <Show when={row.expanded} fallback={<ChevronRight size={14} />}>
+                          <ChevronDown size={14} />
+                        </Show>
+                        <Show when={row.expanded} fallback={<Folder size={16} />}>
+                          <FolderOpen size={16} />
+                        </Show>
+                      </Show>
+                      <span class="file-name">
+                        {row.entry.kind === 'folder'
+                          ? basename(row.entry.path)
+                          : title(row.entry.path)}
+                      </span>
+                      <Show when={props.search && parent(row.entry.path)}>
+                        <span class="file-parent">{parent(row.entry.path)}</span>
+                      </Show>
+                      <Show when={row.entry.kind === 'file' && !props.search}>
+                        <time class="file-date" dateTime={row.entry.modified}>
+                          {shortDate(row.entry.modified)}
+                        </time>
+                      </Show>
+                    </button>
+                    <button
+                      class="icon-button row-rename"
+                      data-name-transition
+                      aria-label={`Rename ${row.entry.kind === 'folder' ? basename(row.entry.path) : title(row.entry.path)}`}
+                      title="Rename"
+                      onClick={() => props.onRename(row.entry.path)}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      class="icon-button row-menu"
+                      data-menu-trigger
+                      aria-label={`Actions for ${row.entry.kind === 'folder' ? basename(row.entry.path) : title(row.entry.path)}`}
+                      aria-expanded={props.menuPath === row.entry.path}
+                      onClick={(e) => props.onMenu(row.entry, e.currentTarget)}
+                    >
+                      <Ellipsis size={17} />
+                    </button>
+                  </>
+                }
+              >
+                <Show when={row.entry.kind === 'folder'} fallback={<FileText size={16} />}>
+                  <Folder size={16} />
+                </Show>
+                {props.renderRename()}
+              </Show>
+            </div>
+          )}
+        </For>
+        <div
+          style={{ height: `${Math.max(0, props.rows.length - end()) * rowHeight}px` }}
+          aria-hidden="true"
+        />
+      </Show>
+    </nav>
+  );
+}
 
 export function Workspace() {
-  const [entries, setEntries] = useState<Entry[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [session, setSession] = useState<DocumentSession>();
-  const sessionRef = useRef<DocumentSession>();
-  const [generation, setGeneration] = useState(0);
-  const [busy, setBusy] = useState(true);
-  const busyRef = useRef(false);
-  const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [selectedFolder, setSelectedFolder] = useState('');
-  const [prompt, setPrompt] = useState<Prompt>();
-  const [deleting, setDeleting] = useState<Entry>();
-  const [trash, setTrash] = useState<TrashEntry[]>();
-  const [history, setHistory] = useState<HistoryEntry[]>();
-  const [menu, setMenu] = useState<string>();
-  const [reloadConfirm, setReloadConfirm] = useState(false);
-  const importRef = useRef<HTMLInputElement>(null);
-  const state = useSyncExternalStore(
-    session?.subscribe ?? (() => () => {}),
-    session?.snapshot ?? (() => emptyState),
+  const w = createWorkspace();
+  const [search, setSearch] = createSignal('');
+  const [mobile, setMobile] = createSignal(window.matchMedia('(max-width: 760px)').matches);
+  const [mobileOpen, setMobileOpen] = createSignal(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(
+    readSetting('sidebar-collapsed') === 'true',
   );
-  const folders = entries.filter((e) => e.kind === 'folder');
-
-  const refresh = useCallback(async () => {
-    const tree = await api.entries();
-    setEntries(tree);
-    return tree;
-  }, []);
-  const mount = useCallback(
-    async (document: Document, expected?: DocumentSession, missing = false) => {
-      let draft;
-      try {
-        draft = await drafts.read(document.path);
-      } catch {
-        /* Server editing still works without IndexedDB. */
-      }
-      if (
-        expected &&
-        (sessionRef.current !== expected || expected.snapshot().dirty || busyRef.current)
-      )
-        return;
-      const next = new DocumentSession(document, api, drafts, draft);
-      if (missing) next.preserveMissing();
-      sessionRef.current?.dispose();
-      sessionRef.current = next;
-      setSession(next);
-      setGeneration((n) => n + 1);
-      remember('excalidraws:last', document.path);
-      setMobileOpen(false);
-    },
-    [],
-  );
-
-  const run = useCallback(async (operation: () => Promise<void>) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setError('');
-    try {
-      await operation();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'The operation could not be completed.');
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
+  const [collapsed, setCollapsed] = createSignal(new Set<string>());
+  const [listCollapsed, setListCollapsed] = createSignal(false);
+  const [sort, setSort] = createSignal(readSetting('sort') === 'name' ? 'name' : 'recent');
+  const [sortOpen, setSortOpen] = createSignal(false);
+  let sortButton!: HTMLButtonElement;
+  const [menu, setMenu] = createSignal<{
+    entry: Entry;
+    left: number;
+    top: number;
+    trigger: HTMLButtonElement;
+  }>();
+  let sidebar!: HTMLElement;
+  let searchInput!: HTMLInputElement;
+  let toggleButton!: HTMLButtonElement;
+  let titleButton: HTMLButtonElement | undefined;
+  const sidebarVisible = createMemo(() => (mobile() ? mobileOpen() : !sidebarCollapsed()));
+  const activePath = w.documentPath;
+  const [renameLocation, setRenameLocation] = createSignal<'sidebar' | 'topbar'>('topbar');
+  const activeName = () =>
+    w.renaming()?.path === activePath() ? w.renaming()!.name : title(activePath());
+  const editingActiveIn = (location: 'sidebar' | 'topbar') =>
+    w.renaming()?.path === activePath() && renameLocation() === location;
+  const activeEntry = createMemo(() => w.entries().find((e) => e.path === activePath()));
+  let rowCache = new Map<string, Row>();
+  const retainRows = (rows: Row[]) => {
+    const stable = rows.map((row) => {
+      const old = rowCache.get(row.entry.path);
+      return old?.entry === row.entry && old.depth === row.depth && old.expanded === row.expanded
+        ? old
+        : row;
+    });
+    rowCache = new Map(stable.map((row) => [row.entry.path, row]));
+    return stable;
+  };
+  const filteredRows = createMemo(() => {
+    const query = search().trim().toLocaleLowerCase();
+    const active = activePath();
+    const entries = w.entries();
+    const compare = (a: Entry, b: Entry) =>
+      a.kind !== b.kind
+        ? a.kind === 'folder'
+          ? -1
+          : 1
+        : sort() === 'recent' && a.kind === 'file'
+          ? b.modified.localeCompare(a.modified) || a.path.localeCompare(b.path)
+          : a.path.localeCompare(b.path, 'en', { numeric: true });
+    if (query)
+      return retainRows(
+        entries
+          .filter((e) => e.path !== active && e.path.toLocaleLowerCase().includes(query))
+          .sort(compare)
+          .map((entry) => ({ entry, depth: 0, expanded: false })),
+      );
+    const children = new Map<string, Entry[]>();
+    for (const entry of entries) {
+      const key = parent(entry.path);
+      const group = children.get(key) ?? [];
+      group.push(entry);
+      children.set(key, group);
     }
-  }, []);
-
-  useEffect(() => {
-    void run(async () => {
-      const tree = await refresh();
-      const last = safeRead('excalidraws:last');
-      if (last && !tree.some((entry) => entry.path === last)) {
-        const draft = await drafts.read(last).catch(() => undefined);
-        if (draft) {
-          await mount(
-            { path: last, revision: draft.revision, scene: draft.scene },
-            undefined,
-            true,
-          );
-          return;
-        }
-      }
-      const first =
-        tree.find((e) => e.kind === 'file' && e.path === last) ??
-        tree.find((e) => e.kind === 'file');
-      if (first) await mount(await api.read(first.path));
-    }).finally(() => setLoaded(true));
-    return () => {
-      sessionRef.current?.dispose();
-    };
-  }, [mount, refresh, run]);
-
-  useEffect(() => {
-    let checking = false;
-    const check = async () => {
-      if (checking || busyRef.current || document.visibilityState === 'hidden') return;
-      checking = true;
-      const current = sessionRef.current;
-      try {
-        const changed = await current?.checkExternal();
-        if (
-          changed &&
-          current === sessionRef.current &&
-          !busyRef.current &&
-          !current?.snapshot().dirty
-        )
-          await mount(changed, current);
-        await refresh();
-      } catch {
-        /* An offline server must not clear the tree or editor. */
-      } finally {
-        checking = false;
+    const rows: Row[] = [];
+    const visit = (path: string, depth: number) => {
+      for (const entry of (children.get(path) ?? []).sort(compare)) {
+        if (entry.path === active) continue;
+        const expanded = !collapsed().has(entry.path);
+        rows.push({ entry, depth, expanded });
+        if (entry.kind === 'folder' && expanded) visit(entry.path, depth + 1);
       }
     };
-    const timer = setInterval(() => {
-      void check();
-    }, 2500);
-    window.addEventListener('online', check);
-    window.addEventListener('focus', check);
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (sessionRef.current?.snapshot().dirty) {
-        event.preventDefault();
-        event.returnValue = '';
-      }
-    };
-    window.addEventListener('beforeunload', beforeUnload);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('online', check);
-      window.removeEventListener('focus', check);
-      window.removeEventListener('beforeunload', beforeUnload);
-    };
-  }, [mount, refresh]);
-
-  const ensureSaved = async () => !sessionRef.current || (await sessionRef.current.flush());
-  const open = (path: string) => {
-    if (path === sessionRef.current?.document.path) {
-      setMobileOpen(false);
+    visit('', 0);
+    return retainRows(rows);
+  });
+  createEffect(() => {
+    saveSetting('sidebar-collapsed', String(sidebarCollapsed()));
+  });
+  createEffect(() => {
+    saveSetting('sort', sort());
+  });
+  createEffect(() => {
+    if (w.session()) untrack(() => setMobileOpen(false));
+  });
+  createEffect(() => {
+    const path = activePath();
+    document.title = path ? `${title(path)} · Excalidraws` : 'Excalidraws';
+  });
+  // Reveal newly created/moved folders without expanding unrelated branches.
+  createEffect(() => {
+    const selected = w.selectedFolder();
+    if (selected)
+      setCollapsed(
+        (previous) =>
+          new Set([...previous].filter((p) => p !== selected && !selected.startsWith(`${p}/`))),
+      );
+  });
+  const closeSidebar = () => {
+    setMobileOpen(false);
+    if (mobile()) toggleButton?.focus();
+  };
+  const toggleSidebar = () =>
+    mobile() ? setMobileOpen(!mobileOpen()) : setSidebarCollapsed(!sidebarCollapsed());
+  const focusSearch = () => {
+    if (mobile()) setMobileOpen(true);
+    else setSidebarCollapsed(false);
+    queueMicrotask(() => searchInput.focus());
+  };
+  const openBoard = (path: string) => {
+    void (async () => {
+      const target = await w.finishRename(path);
+      if (!target) return;
+      closeSidebar();
+      w.open(target);
+    })();
+  };
+  const closeMenu = (focus = false) => {
+    const current = menu();
+    setMenu(undefined);
+    if (focus) current?.trigger.focus();
+  };
+  const openMenu = async (entry: Entry, trigger: HTMLButtonElement) => {
+    const target = await w.finishRename(entry.path);
+    if (!target) return;
+    entry = w.entries().find((item) => item.path === target) ?? entry;
+    setSortOpen(false);
+    if (menu()?.entry.path === entry.path) {
+      closeMenu();
       return;
     }
-    void run(async () => {
-      if (!(await ensureSaved())) return;
-      await mount(await api.read(path));
+    const bounds = trigger.getBoundingClientRect();
+    setMenu({
+      entry,
+      trigger,
+      left: Math.max(8, Math.min(innerWidth - 212, bounds.right - 200)),
+      top: Math.max(8, Math.min(innerHeight - 190, bounds.bottom + 4)),
     });
   };
-  const ask = (mode: Prompt['mode'], path?: string) => {
-    setMenu(undefined);
-    setPrompt({
-      mode,
-      path,
-      name:
-        mode === 'rename' && path
-          ? title(path)
-          : mode === 'copy' && session
-            ? `${title(session.document.path)} (copy)`
-            : '',
-      folder: path ? parent(path) : selectedFolder,
-    });
-  };
-  const submitPrompt = (event: FormEvent) => {
-    event.preventDefault();
-    if (!prompt) return;
-    void run(async () => {
-      const { mode, path, folder } = prompt;
-      const name = prompt.name.trim();
-      if (!name && mode !== 'move') throw new Error('Enter a name.');
-      if (mode !== 'move' && /[/\\]/.test(name))
-        throw new Error('The name cannot contain slashes. Choose a folder from the list.');
-      if (mode === 'copy') {
-        const current = sessionRef.current;
-        if (!current) return;
-        const document = await api.create(
-          join(folder, name.endsWith('.excalidraw') ? name : `${name}.excalidraw`),
-          'file',
-          current.getScene(),
-        );
-        await current.discard();
-        await mount(document);
-      } else {
-        if (!(await ensureSaved())) {
-          setPrompt(undefined);
-          return;
-        }
-        if (mode === 'file' || mode === 'folder') {
-          const relative = join(
-            folder,
-            mode === 'file' && !name.endsWith('.excalidraw') ? `${name}.excalidraw` : name,
-          );
-          const result = await api.create(relative, mode === 'file' ? 'file' : 'folder');
-          if (mode === 'file') await mount(result);
-          else {
-            setSelectedFolder(relative);
-            setCollapsed((value) => new Set([...value].filter((p) => p !== folder)));
-          }
-        } else if (path) {
-          const entry = entries.find((e) => e.path === path)!;
-          const target =
-            mode === 'move'
-              ? join(folder, basename(path))
-              : join(
-                  parent(path),
-                  entry.kind === 'file' && !name.endsWith('.excalidraw')
-                    ? `${name}.excalidraw`
-                    : name,
-                );
-          if (path !== target) {
-            await api.move(path, target);
-            const current = sessionRef.current?.document.path;
-            if (current === path || current?.startsWith(`${path}/`)) {
-              await mount(await api.read(target + current.slice(path.length)));
-            }
-            if (selectedFolder === path || selectedFolder.startsWith(`${path}/`))
-              setSelectedFolder(target + selectedFolder.slice(path.length));
-          }
-        }
+  const ask = (mode: Parameters<typeof w.ask>[0], path?: string) => {
+    void (async () => {
+      if (!(await w.rename())) return;
+      closeMenu();
+      w.ask(mode, path);
+      if (mode === 'move') {
+        if (mobile()) setMobileOpen(true);
+        else setSidebarCollapsed(false);
       }
-      await refresh();
-      setPrompt(undefined);
-    });
+    })();
   };
-  const deleteEntry = () =>
-    void run(async () => {
-      if (!deleting || !(await ensureSaved())) {
-        setDeleting(undefined);
+  const startRename = (path: string, location: 'sidebar' | 'topbar' = 'sidebar') => {
+    if (w.busy()) return;
+    if (w.renaming()?.path === path) {
+      setRenameLocation(location);
+      return;
+    }
+    void (async () => {
+      const target = await w.finishRename(path);
+      if (!target) return;
+      closeMenu();
+      w.setPrompt(undefined);
+      setRenameLocation(location);
+      if (target === activePath() && location === 'topbar') closeSidebar();
+      else {
+        setSearch('');
+        setListCollapsed(false);
+        setCollapsed(
+          (previous) => new Set([...previous].filter((p) => !target.startsWith(`${p}/`))),
+        );
+      }
+      w.startRename(target);
+    })();
+  };
+  const create = (kind: Entry['kind']) => {
+    void (async () => {
+      if (!(await w.rename())) return;
+      closeMenu();
+      w.setPrompt(undefined);
+      setSearch('');
+      setListCollapsed(false);
+      const destination = w.selectedFolder();
+      setCollapsed(
+        (previous) =>
+          new Set(
+            [...previous].filter(
+              (path) => path !== destination && !destination.startsWith(`${path}/`),
+            ),
+          ),
+      );
+      w.create(kind);
+    })();
+  };
+  const focusActiveName = () => {
+    if (renameLocation() === 'sidebar')
+      sidebar.querySelector<HTMLButtonElement>('.active-rename')?.focus();
+    else titleButton?.focus();
+  };
+  const renderRename = () => (
+    <InlineName
+      value={w.renaming()!}
+      label={
+        w.entries().find((entry) => entry.path === w.renaming()?.path)?.kind === 'folder'
+          ? 'Folder name'
+          : 'Canvas name'
+      }
+      busy={w.busy()}
+      onInput={(name) => w.setRenaming((value) => value && { ...value, name, error: '' })}
+      onSave={async (restoreFocus) => {
+        const value = w.renaming();
+        const active = value?.path === activePath();
+        const entry = w.entries().find((entry) => entry.path === value?.path);
+        const saved = await w.rename();
+        if (saved && restoreFocus) {
+          if (active) focusActiveName();
+          else if (value && entry) {
+            const target = pathWithName(entry, value.name);
+            sidebar
+              .querySelector<HTMLButtonElement>(
+                `[data-entry-path="${CSS.escape(target)}"] .file-select`,
+              )
+              ?.focus();
+          }
+        }
+        return saved;
+      }}
+      onCancel={() => {
+        const active = w.renaming()?.path === activePath();
+        const path = w.renaming()?.path;
+        w.cancelRename();
+        if (active) focusActiveName();
+        else if (path)
+          sidebar
+            .querySelector<HTMLButtonElement>(
+              `[data-entry-path="${CSS.escape(path)}"] .file-select`,
+            )
+            ?.focus();
+      }}
+    />
+  );
+  const closeSort = (focus = false) => {
+    setSortOpen(false);
+    if (focus) sortButton.focus();
+  };
+  const openSort = () => {
+    closeMenu();
+    setSortOpen(true);
+  };
+  onMount(() => {
+    const media = window.matchMedia('(max-width: 760px)');
+    const resize = () => {
+      setMobile(media.matches);
+      setMobileOpen(false);
+      closeMenu();
+      closeSort();
+    };
+    const pointer = (e: PointerEvent) => {
+      if (sortOpen() && e.target instanceof Element && !e.target.closest('.canvas-sort'))
+        closeSort();
+      if (
+        menu() &&
+        e.target instanceof Element &&
+        !e.target.closest('.entry-menu, [data-menu-trigger]')
+      )
+        closeMenu();
+    };
+    const keydown = (e: KeyboardEvent) => {
+      if (document.querySelector('dialog[open]')) return;
+      if (
+        e.key === 'Escape' &&
+        e.target instanceof Element &&
+        e.target.closest('.inline-name, .organize-panel form')
+      )
+        return;
+      if (e.key === 'Escape') {
+        if (sortOpen()) {
+          e.preventDefault();
+          closeSort(true);
+        } else if (menu()) {
+          e.preventDefault();
+          closeMenu(true);
+        } else if (mobileOpen()) {
+          e.preventDefault();
+          closeSidebar();
+        }
         return;
       }
-      await api.trash(deleting.path);
-      const active = sessionRef.current?.document.path;
-      if (active === deleting.path || active?.startsWith(`${deleting.path}/`)) {
-        sessionRef.current?.dispose();
-        sessionRef.current = undefined;
-        setSession(undefined);
-        remember('excalidraws:last', '');
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.key.toLowerCase() === 'k' &&
+        !document.querySelector('dialog[open]')
+      ) {
+        e.preventDefault();
+        focusSearch();
       }
-      if (selectedFolder === deleting.path || selectedFolder.startsWith(`${deleting.path}/`))
-        setSelectedFolder('');
-      setDeleting(undefined);
-      await refresh();
-    });
-  const download = () => {
-    if (!session) return;
-    const blob = new Blob([JSON.stringify(session.getScene(), null, 2)], {
-      type: 'application/vnd.excalidraw+json',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = basename(session.document.path);
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-  const onImport = (files: FileList | null) => {
-    if (!files?.length) return;
-    // FileList is live: clearing the input before an awaited save empties it.
-    const importedFiles = Array.from(files);
-    void run(async () => {
-      if (!(await ensureSaved())) return;
-      let last: Document | undefined;
-      for (const file of importedFiles) {
-        if (file.size > 40 * 1024 * 1024) throw new Error('The file exceeds 40 MB.');
-        const scene = await importScene(file);
-        const original = file.name.replace(/\.excalidraw$|\.json$/g, '');
-        let suffix = 0;
-        while (true) {
-          const path = join(
-            selectedFolder,
-            `${original}${suffix ? ` (${suffix})` : ''}.excalidraw`,
-          );
-          try {
-            last = await api.create(path, 'file', scene);
-            break;
-          } catch (e) {
-            if (e instanceof Error && 'code' in e && e.code === 'exists') {
-              suffix++;
-              continue;
-            }
-            throw e;
-          }
+      if (mobile() && mobileOpen() && e.key === 'Tab') {
+        const focusable = [
+          ...sidebar.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'),
+        ].filter((el) => el.getClientRects().length);
+        const first = focusable[0],
+          last = focusable.at(-1);
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
         }
       }
-      await refresh();
-      if (last) await mount(last);
+    };
+    media.addEventListener('change', resize);
+    document.addEventListener('pointerdown', pointer);
+    document.addEventListener('keydown', keydown);
+    onCleanup(() => {
+      media.removeEventListener('change', resize);
+      document.removeEventListener('pointerdown', pointer);
+      document.removeEventListener('keydown', keydown);
     });
-    if (importRef.current) importRef.current.value = '';
+  });
+  createEffect(() => {
+    if (mobile() && mobileOpen())
+      queueMicrotask(() => sidebar.querySelector<HTMLButtonElement>('button')?.focus());
+  });
+  const modalClose = (close: () => void) => {
+    if (!w.busy()) close();
   };
-  const reload = () =>
-    void run(async () => {
-      if (!sessionRef.current) return;
-      const current = sessionRef.current;
-      const remote = await api.read(current.document.path);
-      await current.discard();
-      await mount(remote);
-      setReloadConfirm(false);
-    });
 
-  const renderTree = (folder: string, depth = 0): ReactNode =>
-    entries
-      .filter((e) => parent(e.path) === folder)
-      .map((entry) => {
-        const isFolder = entry.kind === 'folder';
-        const matches =
-          !search ||
-          entry.path.toLocaleLowerCase().includes(search.toLocaleLowerCase()) ||
-          (isFolder &&
-            entries.some(
-              (e) =>
-                e.path.startsWith(`${entry.path}/`) &&
-                e.path.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-            ));
-        if (!matches) return null;
-        const expanded = !!search || !collapsed.has(entry.path);
-        const active = isFolder
-          ? selectedFolder === entry.path
-          : session?.document.path === entry.path;
-        return (
-          <div key={entry.path}>
-            <div
-              className={`tree-row ${active ? 'active' : ''}`}
-              style={{ paddingLeft: 12 + depth * 15 }}
-            >
-              <button
-                className="tree-select"
-                aria-current={!isFolder && active ? 'page' : undefined}
-                aria-expanded={isFolder ? expanded : undefined}
-                title={entry.path}
-                onClick={() => {
-                  if (isFolder) {
-                    setSelectedFolder(entry.path);
-                    setCollapsed((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(entry.path)) next.delete(entry.path);
-                      else next.add(entry.path);
-                      return next;
-                    });
-                  } else {
-                    setSelectedFolder(parent(entry.path));
-                    open(entry.path);
-                  }
-                }}
-              >
-                {isFolder ? (
-                  <>
-                    {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    {expanded ? <FolderOpen size={16} /> : <Folder size={16} />}
-                  </>
-                ) : (
-                  <FileText size={16} className="file-icon" />
-                )}
-                <span>{isFolder ? basename(entry.path) : title(entry.path)}</span>
-                {!isFolder && active && state.dirty && (
-                  <span className="dirty-dot" aria-label="Unsaved changes" />
-                )}
-              </button>
-              <button
-                className="row-menu icon-button"
-                aria-label={`Actions for ${title(entry.path)}`}
-                aria-expanded={menu === entry.path}
-                onClick={() => setMenu(menu === entry.path ? undefined : entry.path)}
-              >
-                <MoreHorizontal size={16} />
-              </button>
-            </div>
-            {menu === entry.path && (
-              <div className="entry-actions">
-                <span className="entry-action-name">{title(entry.path)}</span>
-                <button onClick={() => ask('rename', entry.path)}>
-                  <Pencil size={14} />
-                  Rename
-                </button>
-                <button onClick={() => ask('move', entry.path)}>
-                  <ArrowRight size={14} />
-                  Move to…
-                </button>
-                <button
-                  className="danger-text"
-                  onClick={() => {
-                    setDeleting(entry);
-                    setMenu(undefined);
-                  }}
-                >
-                  <Trash2 size={14} />
-                  Move to trash
-                </button>
-              </div>
-            )}
-            {isFolder && expanded && renderTree(entry.path, depth + 1)}
-          </div>
-        );
-      });
-
-  const statusLabels = {
-    saved: 'Saved',
-    pending: 'Pending changes',
-    saving: 'Saving…',
-    offline: 'Not saved',
-    conflict: 'Conflict',
-  };
   return (
-    <div className="workspace">
+    <div
+      class="workspace"
+      classList={{
+        'sidebar-closed': !sidebarVisible(),
+        'mobile-sidebar-open': mobile() && mobileOpen(),
+      }}
+    >
+      <span class="sr-only" aria-live="polite">
+        {w.announcement()}
+      </span>
       <input
-        ref={importRef}
         type="file"
         accept=".excalidraw,.json"
         multiple
         hidden
-        onChange={(event) => onImport(event.target.files)}
         aria-label="Import files"
+        ref={w.setImportInput}
+        onChange={(e) => w.onImport(e.currentTarget.files)}
       />
-      {mobileOpen && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Close explorer"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
-      <aside className={`sidebar ${mobileOpen ? 'is-open' : ''}`} aria-label="Canvas explorer">
-        <div className="brand">
-          <span className="brand-icon">
-            <Shapes size={23} strokeWidth={1.6} />
-          </span>
-          <span>
-            excalidraws<span className="brand-caption">A SPACE FOR YOUR IDEAS</span>
-          </span>
+      <Show when={mobile() && mobileOpen()}>
+        <button class="sidebar-scrim" aria-label="Close explorer" onClick={closeSidebar} />
+      </Show>
+      <aside
+        id="canvas-explorer"
+        class="sidebar"
+        aria-label="Canvas explorer"
+        ref={sidebar}
+        inert={!sidebarVisible()}
+      >
+        <div class="sidebar-header">
           <button
-            className="icon-button mobile-only"
+            class="icon-button"
             aria-label="Close sidebar"
-            onClick={() => setMobileOpen(false)}
+            title="Hide sidebar"
+            onClick={() => (mobile() ? closeSidebar() : setSidebarCollapsed(true))}
           >
-            <X size={18} />
+            <PanelLeftClose size={18} />
           </button>
-        </div>
-        <button className="primary new-canvas" onClick={() => ask('file')} disabled={busy}>
-          <Plus size={18} />
-          New canvas<span>↵</span>
-        </button>
-        <div className="search">
-          <Search size={16} />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search canvases…"
-            aria-label="Search canvases"
-          />
-          {search && (
-            <button className="icon-button" aria-label="Clear search" onClick={() => setSearch('')}>
-              <X size={13} />
+          <span class="brand">Excalidraws</span>
+          <div class="navigation-buttons">
+            <button
+              class="icon-button"
+              aria-label="Previous canvas"
+              data-name-transition
+              title="Previous canvas"
+              disabled={w.navigation().index <= 0 || w.busy()}
+              onClick={() => void w.rename().then((saved) => saved && w.navigate(-1))}
+            >
+              <ArrowLeft size={17} />
             </button>
-          )}
+            <button
+              class="icon-button"
+              aria-label="Next canvas"
+              data-name-transition
+              title="Next canvas"
+              disabled={w.navigation().index >= w.navigation().paths.length - 1 || w.busy()}
+              onClick={() => void w.rename().then((saved) => saved && w.navigate(1))}
+            >
+              <ArrowRight size={17} />
+            </button>
+          </div>
         </div>
-        <div className="tree-heading">
+        <div class="sidebar-search">
+          <label class="search-field">
+            <Search size={17} />
+            <input
+              ref={searchInput}
+              type="text"
+              inputmode="search"
+              placeholder="Search canvases…"
+              aria-label="Search canvases"
+              value={search()}
+              onInput={(e) => setSearch(e.currentTarget.value)}
+            />
+          </label>
           <button
-            className={selectedFolder === '' ? 'root-selected' : ''}
-            onClick={() => setSelectedFolder('')}
+            class="icon-button"
+            title="New folder"
+            aria-label="New folder"
+            data-name-transition
+            disabled={w.busy()}
+            onClick={() => create('folder')}
           >
-            MY CANVASES
+            <FolderPlus size={18} />
           </button>
-          <div>
-            <button
-              className="icon-button"
-              aria-label="New folder"
-              title="New folder"
-              onClick={() => ask('folder')}
-              disabled={busy}
-            >
-              <FolderPlus size={16} />
-            </button>
-            <button
-              className="icon-button"
-              aria-label="Import canvases"
-              title="Import .excalidraw"
-              onClick={() => importRef.current?.click()}
-              disabled={busy}
-            >
-              <ArrowUpFromLine size={16} />
-            </button>
-          </div>
-        </div>
-        <nav className="file-tree" aria-label="Files">
-          {renderTree('')}
-          {loaded && !entries.length && (
-            <p className="tree-empty">
-              Your ideas will live here.
-              <br />
-              Create your first canvas to get started.
-            </p>
-          )}
-          {search &&
-            !entries.some((e) =>
-              e.path.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-            ) && <p className="tree-empty">No canvases match that name.</p>}
-        </nav>
-        {selectedFolder && (
-          <div className="destination" title={selectedFolder}>
-            <FolderOpen size={13} />
-            Create in {basename(selectedFolder)}
-            <button
-              className="icon-button"
-              aria-label="Create in root"
-              onClick={() => setSelectedFolder('')}
-            >
-              <X size={12} />
-            </button>
-          </div>
-        )}
-        <div className="sidebar-bottom">
-          <button onClick={() => void run(async () => setTrash(await api.listTrash()))}>
-            <Trash2 size={16} />
-            Trash
-          </button>
-          <div className="vault-note">
-            <span className="connection-dot" />
-            Files on your server<span>.excalidraw</span>
-          </div>
-        </div>
-      </aside>
-      <main className="main-area">
-        <header className="topbar">
           <button
-            className="icon-button mobile-only"
-            aria-label="Open explorer"
-            onClick={() => setMobileOpen(true)}
+            class="icon-button"
+            title="New canvas"
+            aria-label="New canvas"
+            data-name-transition
+            disabled={w.busy()}
+            onClick={() => create('file')}
           >
-            <Menu size={20} />
+            <FilePlus2 size={18} />
           </button>
-          <div className="breadcrumbs">
-            <LayoutPanelLeft size={16} />
-            <span className="breadcrumb-parent">
-              {session ? parent(session.document.path) || 'My canvases' : 'My canvases'}
-            </span>
-            {session && (
-              <>
-                <ChevronRight size={13} />
-                <h1>{title(session.document.path)}</h1>
-              </>
-            )}
-          </div>
-          {session && (
-            <div className="document-tools">
-              <span
-                className={`save-status ${state.status}`}
-                role="status"
-                title={state.message || 'Saved to the server'}
-              >
-                {state.status === 'saved' ? (
-                  <Check size={14} />
-                ) : state.status === 'saving' ? (
-                  <LoaderCircle size={14} className="spin" />
-                ) : state.status === 'conflict' || state.status === 'offline' ? (
-                  <TriangleAlert size={14} />
-                ) : (
-                  <Circle size={9} />
-                )}
-                <span>{statusLabels[state.status]}</span>
-              </span>
-              <span className="tool-separator" />
-              <button
-                className="icon-button"
-                title="Version history"
-                aria-label="Version history"
-                onClick={() =>
-                  void run(async () => {
-                    if (await ensureSaved()) setHistory(await api.history(session.document.path));
-                  })
+        </div>
+        <Show when={w.session()}>
+          {(session) => (
+            <div class="active-card">
+              <Show
+                when={editingActiveIn('sidebar')}
+                fallback={
+                  <button
+                    class="active-select"
+                    aria-label={activeName()}
+                    aria-current="page"
+                    title={activePath()}
+                    onClick={() => openBoard(activePath())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'F2') {
+                        e.preventDefault();
+                        startRename(activePath());
+                      }
+                    }}
+                  >
+                    <span class="active-context">
+                      <FileText size={15} />
+                      <span>{parent(activePath()) || 'My canvases'}</span>
+                      <Show when={activeEntry()}>
+                        {(entry) => (
+                          <time dateTime={entry().modified}>{shortDate(entry().modified)}</time>
+                        )}
+                      </Show>
+                    </span>
+                    <span class="active-title">{activeName()}</span>
+                    <span class="active-state">
+                      <span
+                        class="state-dot"
+                        classList={{
+                          dirty: w.state().dirty,
+                          problem:
+                            w.state().status === 'offline' || w.state().status === 'conflict',
+                        }}
+                      />
+                      {statusLabels[w.state().status]}
+                    </span>
+                  </button>
                 }
               >
-                <History size={17} />
-              </button>
+                <div class="active-name-editor">{renderRename()}</div>
+              </Show>
+              <Show when={!editingActiveIn('sidebar')}>
+                <button
+                  class="icon-button active-rename"
+                  data-name-transition
+                  aria-label={`Rename ${activeName()} in sidebar`}
+                  title="Rename"
+                  disabled={w.busy()}
+                  onClick={() => startRename(activePath())}
+                >
+                  <Pencil size={14} />
+                </button>
+              </Show>
               <button
-                className="icon-button"
-                title="Download .excalidraw"
-                aria-label="Download canvas"
-                onClick={download}
+                class="icon-button active-menu"
+                data-menu-trigger
+                aria-label={`Actions for ${title(activePath())}`}
+                aria-expanded={menu()?.entry.path === activePath()}
+                onClick={(e) =>
+                  openMenu(
+                    activeEntry() ?? { path: activePath(), kind: 'file', modified: '' },
+                    e.currentTarget,
+                  )
+                }
               >
-                <ArrowDownToLine size={17} />
-              </button>
-              <button
-                className="icon-button"
-                title="Rename canvas"
-                aria-label="Rename canvas"
-                onClick={() => ask('rename', session.document.path)}
-              >
-                <Pencil size={16} />
+                <Ellipsis size={17} />
               </button>
             </div>
           )}
-        </header>
-        {error && (
-          <div className="notice error" role="alert">
-            <TriangleAlert size={18} />
-            <span>{error}</span>
+        </Show>
+        <div class="section-heading">
+          <button
+            class="section-toggle"
+            aria-expanded={!listCollapsed() || !!search()}
+            onClick={() => setListCollapsed(!listCollapsed())}
+          >
+            <span>Canvases</span>
+            <span class="entry-count">{w.entries().filter((e) => e.kind === 'file').length}</span>
+            <Show when={listCollapsed() && !search()} fallback={<ChevronDown size={14} />}>
+              <ChevronRight size={14} />
+            </Show>
+          </button>
+          <div class="canvas-sort">
             <button
-              className="text-button"
-              onClick={() => {
-                setError('');
-                if (!session && !entries.length)
-                  void run(async () => {
-                    await refresh();
+              ref={sortButton}
+              class="icon-button"
+              aria-label="Sort canvases"
+              aria-haspopup="menu"
+              aria-expanded={sortOpen()}
+              aria-controls="canvas-sort-menu"
+              title={`Sort canvases · ${sort() === 'recent' ? 'Recent' : 'Name (A–Z)'}`}
+              onClick={() => (sortOpen() ? closeSort() : openSort())}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  openSort();
+                }
+              }}
+            >
+              <SlidersHorizontal size={15} />
+            </button>
+            <Show when={sortOpen()}>
+              <div
+                id="canvas-sort-menu"
+                class="entry-menu sort-menu"
+                role="menu"
+                aria-label="Sort canvases"
+                ref={(element) =>
+                  queueMicrotask(() =>
+                    element.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(),
+                  )
+                }
+                onKeyDown={(event) => {
+                  if (event.key === 'Tab') {
+                    closeSort(true);
+                    return;
+                  }
+                  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                  event.preventDefault();
+                  const buttons = [...event.currentTarget.querySelectorAll('button')];
+                  const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                  const target =
+                    event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? buttons.length - 1
+                        : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) %
+                          buttons.length;
+                  buttons[target]?.focus();
+                }}
+              >
+                <span class="menu-title">Sort by</span>
+                <For
+                  each={[
+                    { value: 'recent', label: 'Recent changes' },
+                    { value: 'name', label: 'Name (A–Z)' },
+                  ]}
+                >
+                  {(option) => (
+                    <button
+                      role="menuitemradio"
+                      aria-checked={sort() === option.value}
+                      onClick={() => {
+                        setSort(option.value);
+                        closeSort(true);
+                      }}
+                    >
+                      <span class="sort-check">
+                        <Show when={sort() === option.value}>
+                          <Check size={15} />
+                        </Show>
+                      </span>
+                      {option.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </div>
+        <Show when={!listCollapsed() || search()} fallback={<div class="sidebar-fill" />}>
+          <FileList
+            rows={filteredRows()}
+            active={activePath()}
+            search={search()}
+            menuPath={menu()?.entry.path}
+            loaded={w.loaded()}
+            selectedFolder={w.selectedFolder()}
+            renaming={w.renaming()}
+            renderRename={renderRename}
+            onRename={(path) => startRename(path)}
+            onMenu={openMenu}
+            onOpen={(row) => {
+              if (row.entry.kind === 'file') openBoard(row.entry.path);
+              else
+                void (async () => {
+                  const target = await w.finishRename(row.entry.path);
+                  if (!target) return;
+                  w.setSelectedFolder(target);
+                  setCollapsed((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(target)) next.delete(target);
+                    else next.add(target);
+                    return next;
                   });
+                })();
+            }}
+          />
+        </Show>
+        <Show when={w.prompt()?.mode === 'move' && w.prompt()}>
+          {(prompt) => (
+            <section class="organize-panel" aria-label="Move item">
+              <div class="organize-heading">
+                <span>
+                  Move <strong title={prompt().path}>{title(prompt().path!)}</strong>
+                </span>
+                <button
+                  class="icon-button"
+                  aria-label="Cancel move"
+                  disabled={w.busy()}
+                  onClick={() => w.setPrompt(undefined)}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+              <form
+                onSubmit={w.submitPrompt}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    modalClose(() => w.setPrompt(undefined));
+                  }
+                }}
+              >
+                <label>
+                  Folder
+                  <select
+                    value={prompt().folder}
+                    ref={(element) => queueMicrotask(() => element.focus())}
+                    onChange={(e) => w.setPrompt({ ...prompt(), folder: e.currentTarget.value })}
+                  >
+                    <option value="">My canvases /</option>
+                    <For
+                      each={w
+                        .folders()
+                        .filter(
+                          (e) =>
+                            e.path !== prompt().path && !e.path.startsWith(`${prompt().path}/`),
+                        )}
+                    >
+                      {(entry) => <option value={entry.path}>{entry.path}</option>}
+                    </For>
+                  </select>
+                </label>
+                <Show when={w.error()}>
+                  <p class="form-error" role="alert">
+                    {w.error()}
+                  </p>
+                </Show>
+                <button
+                  class="primary"
+                  disabled={w.busy() || prompt().folder === parent(prompt().path!)}
+                >
+                  Move
+                </button>
+              </form>
+            </section>
+          )}
+        </Show>
+        <div class="destination">
+          <Folder size={14} />
+          <span title={w.selectedFolder() || 'My canvases'}>
+            <small>Creating in</small>
+            {w.selectedFolder() || 'My canvases'}
+          </span>
+          <Show when={w.selectedFolder()}>
+            <button
+              class="icon-button"
+              aria-label="Create in root"
+              title="Create in root"
+              onClick={() => w.setSelectedFolder('')}
+            >
+              <X size={14} />
+            </button>
+          </Show>
+        </div>
+        <div class="sidebar-footer">
+          <button
+            class="footer-button"
+            aria-label="Trash"
+            title="Trash"
+            onClick={w.showTrash}
+            disabled={w.busy()}
+          >
+            <Trash2 size={17} />
+            <span>Trash</span>
+          </button>
+          <button
+            class="icon-button"
+            aria-label="Import canvases"
+            title="Import .excalidraw files"
+            onClick={w.importFiles}
+            disabled={w.busy()}
+          >
+            <ArrowUpFromLine size={17} />
+          </button>
+        </div>
+      </aside>
+      <main class="main-area" inert={mobile() && mobileOpen()}>
+        <header class="topbar">
+          <Show when={!sidebarVisible() || mobile()}>
+            <button
+              ref={toggleButton}
+              class="icon-button explorer-toggle"
+              aria-label="Open explorer"
+              title="Show sidebar"
+              aria-expanded={sidebarVisible()}
+              aria-controls="canvas-explorer"
+              onClick={toggleSidebar}
+            >
+              <PanelLeft size={19} />
+            </button>
+          </Show>
+          <div class="document-title">
+            <Show when={w.session()} fallback={<span class="empty-title">Excalidraws</span>}>
+              {(session) => (
+                <>
+                  <Show when={parent(activePath())}>
+                    <button
+                      class="breadcrumb-parent"
+                      aria-label={`Show folder ${parent(activePath())}`}
+                      title={`Show ${parent(activePath())}`}
+                      onClick={() => {
+                        w.setSelectedFolder(parent(activePath()));
+                        setSearch('');
+                        setListCollapsed(false);
+                        if (mobile()) setMobileOpen(true);
+                        else setSidebarCollapsed(false);
+                      }}
+                    >
+                      {parent(activePath())}
+                    </button>
+                    <ChevronRight class="breadcrumb-chevron" size={13} />
+                  </Show>
+                  <Show
+                    when={editingActiveIn('topbar')}
+                    fallback={
+                      <div class="canvas-name">
+                        <h1 title={activeName()} aria-label={activeName()}>
+                          <button
+                            ref={titleButton}
+                            class="title-button"
+                            aria-label={`Rename ${activeName()}`}
+                            title="Click to rename"
+                            onClick={() => startRename(activePath(), 'topbar')}
+                            disabled={w.busy()}
+                          >
+                            {activeName()}
+                          </button>
+                        </h1>
+                        <button
+                          class="icon-button"
+                          aria-label="Rename canvas"
+                          data-name-transition
+                          title="Rename canvas"
+                          onClick={() => startRename(activePath(), 'topbar')}
+                          disabled={w.busy()}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </div>
+                    }
+                  >
+                    {renderRename()}
+                  </Show>
+                </>
+              )}
+            </Show>
+          </div>
+          <Show when={w.session()}>
+            {(session) => (
+              <div class="document-tools">
+                <span
+                  class="save-status"
+                  classList={{
+                    problem: w.state().status === 'conflict' || w.state().status === 'offline',
+                  }}
+                  role="status"
+                  title={w.state().message || statusLabels[w.state().status]}
+                >
+                  <Show
+                    when={w.state().status === 'saved'}
+                    fallback={<span class="state-dot dirty" />}
+                  >
+                    <Check size={14} />
+                  </Show>
+                  <span>{statusLabels[w.state().status]}</span>
+                </span>
+                <button
+                  class="icon-button"
+                  aria-label="Version history"
+                  title="Version history"
+                  onClick={w.showHistory}
+                  disabled={w.busy()}
+                >
+                  <History size={17} />
+                </button>
+                <button
+                  class="icon-button"
+                  aria-label="Download canvas"
+                  title="Download .excalidraw"
+                  onClick={w.download}
+                >
+                  <ArrowDownToLine size={17} />
+                </button>
+              </div>
+            )}
+          </Show>
+        </header>
+        <Show when={w.error() && !w.prompt()}>
+          <div class="notice error" role="alert">
+            <span>{w.error()}</span>
+            <button
+              onClick={() => {
+                w.setError('');
+                w.refresh();
               }}
             >
               Retry
             </button>
-            <button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}>
+            <button class="icon-button" aria-label="Dismiss error" onClick={() => w.setError('')}>
               <X size={16} />
             </button>
           </div>
-        )}
-        {state.localError && (
-          <div className="notice warning" role="alert">
-            Your browser cannot save a local draft. Keep this page open until the status shows
-            “Saved”.
+        </Show>
+        <Show when={w.state().localError}>
+          <div class="notice warning" role="alert">
+            Local draft unavailable. Keep this page open until the status shows “Saved”.
           </div>
-        )}
-        {session && (state.status === 'conflict' || state.status === 'offline') && (
-          <div className="notice warning" role="alert">
-            <TriangleAlert size={18} />
-            <span>{state.message}</span>
-            {state.status === 'offline' ? (
-              <button onClick={() => void session.flush()}>Retry saving</button>
-            ) : (
-              <button onClick={() => setReloadConfirm(true)}>Load from server</button>
-            )}
+        </Show>
+        <Show
+          when={w.session() && (w.state().status === 'conflict' || w.state().status === 'offline')}
+        >
+          <div class="notice warning" role="alert">
+            <span>{w.state().message}</span>
+            <Show
+              when={w.state().status === 'offline'}
+              fallback={<button onClick={() => w.setReloadConfirm(true)}>Load from server</button>}
+            >
+              <button onClick={() => void w.session()?.flush()}>Retry saving</button>
+            </Show>
             <button onClick={() => ask('copy')}>Save a copy</button>
-            <button className="text-button" onClick={download}>
-              Download
-            </button>
+            <button onClick={w.download}>Download</button>
           </div>
-        )}
-        <div className={`editor-area ${busy ? 'is-busy' : ''}`}>
-          {session ? (
-            <ExcalidrawAdapter
-              key={`${session.document.path}:${generation}`}
-              scene={session.initialScene}
-              onChange={session.change}
-              onImport={() => importRef.current?.click()}
-              disabled={busy}
-            />
-          ) : (
-            <div className="welcome">
-              <div className="welcome-art">
-                <Shapes size={62} strokeWidth={1.1} />
-                <span className="art-dot" />
-                <span className="art-line" />
+        </Show>
+        <div
+          class="editor-area"
+          classList={{ 'is-busy': w.busy() }}
+          aria-busy={w.busy()}
+          inert={w.busy()}
+        >
+          <Show
+            when={w.session()}
+            keyed
+            fallback={
+              <div class="empty-workspace">
+                <p>{w.loaded() ? 'Open a canvas or create one.' : 'Loading workspace…'}</p>
+                <Show when={w.loaded()}>
+                  <button
+                    class="primary"
+                    data-name-transition
+                    onClick={() => create('file')}
+                    disabled={w.busy()}
+                  >
+                    <FilePlus2 size={16} />
+                    Create canvas
+                  </button>
+                </Show>
               </div>
-              <span className="eyebrow">MAKE ROOM FOR YOUR IDEAS</span>
-              <h1>It all starts with a line.</h1>
-              <p>
-                A place to draw, connect ideas, and think out loud.
-                <br />
-                Every canvas, a file. Always within reach.
-              </p>
-              <button className="primary" onClick={() => ask('file')} disabled={busy}>
-                <FilePlus2 size={18} />
-                Create my first canvas
-              </button>
-              <button
-                className="text-button import-welcome"
-                onClick={() => importRef.current?.click()}
-                disabled={busy}
-              >
-                Or import an .excalidraw file <ArrowRight size={14} />
-              </button>
-              <div className="welcome-features">
-                <span>
-                  <Check size={14} />
-                  Automatic saving
-                </span>
-                <span>
-                  <Folder size={14} />
-                  Your files, on your server
-                </span>
-              </div>
+            }
+          >
+            {(session) => (
+              <EditorSurface
+                session={session}
+                onImport={w.importFiles}
+                onReady={w.setEditor}
+                onPending={w.setEditorPending}
+                onError={(e) =>
+                  w.setError(
+                    e instanceof Error ? e.message : 'Could not load the editor. Reload to retry.',
+                  )
+                }
+              />
+            )}
+          </Show>
+          <Show when={w.busy()}>
+            <div class="processing" aria-label="Processing">
+              {w.switchTarget() ? `Opening ${title(w.switchTarget())}…` : 'Working…'}
             </div>
-          )}
-          {busy && (
-            <div className="busy-overlay" aria-label="Processing">
-              <LoaderCircle size={24} className="spin" />
-            </div>
-          )}
+          </Show>
         </div>
       </main>
-
-      {prompt && (
-        <Modal
-          title={
-            {
-              file: 'New canvas',
-              folder: 'New folder',
-              rename: 'Rename',
-              move: 'Move to another folder',
-              copy: 'Save a copy',
-            }[prompt.mode]
-          }
-          onClose={() => {
-            if (!busy) setPrompt(undefined);
-          }}
-        >
-          <form onSubmit={submitPrompt}>
-            {prompt.mode !== 'move' && (
-              <label>
-                Name
-                <input
-                  autoFocus
-                  required
-                  maxLength={160}
-                  value={prompt.name}
-                  placeholder={
-                    prompt.mode === 'folder' ? 'For example, Projects' : 'For example, A new idea'
-                  }
-                  onChange={(e) => setPrompt({ ...prompt, name: e.target.value })}
-                />
-              </label>
-            )}
-            {prompt.mode !== 'rename' && (
-              <label>
-                Folder
-                <select
-                  autoFocus={prompt.mode === 'move'}
-                  value={prompt.folder}
-                  onChange={(e) => setPrompt({ ...prompt, folder: e.target.value })}
-                >
-                  <option value="">My canvases /</option>
-                  {folders
-                    .filter(
-                      (e) =>
-                        prompt.mode !== 'move' ||
-                        (e.path !== prompt.path && !e.path.startsWith(`${prompt.path}/`)),
-                    )
-                    .map((e) => (
-                      <option key={e.path} value={e.path}>
-                        {e.path}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            )}
-            {prompt.mode === 'copy' && (
-              <p className="dialog-help">
-                Your current drawing will be saved as a new file. The server file will keep its
-                current version.
-              </p>
-            )}
-            {error && (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="dialog-actions">
-              <button type="button" onClick={() => setPrompt(undefined)} disabled={busy}>
-                Cancel
+      <Show when={menu()}>
+        {(value) => (
+          <div
+            class="entry-menu"
+            style={{ left: `${value().left}px`, top: `${value().top}px` }}
+            role="group"
+            aria-label="Canvas actions"
+            onKeyDown={(e) => {
+              if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+              e.preventDefault();
+              const buttons = [...e.currentTarget.querySelectorAll('button')];
+              const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+              buttons[
+                (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+              ]?.focus();
+            }}
+            ref={(element) => queueMicrotask(() => element.querySelector('button')?.focus())}
+          >
+            <span class="menu-title">{title(value().entry.path)}</span>
+            <button onClick={() => startRename(value().entry.path)}>
+              <Pencil size={15} />
+              Rename
+            </button>
+            <button onClick={() => ask('move', value().entry.path)}>
+              <ArrowRight size={15} />
+              Move to…
+            </button>
+            <Show when={value().entry.path === activePath()}>
+              <button onClick={() => ask('copy')}>
+                <FilePlus2 size={15} />
+                Save a copy
               </button>
-              <button
-                className="primary"
-                disabled={busy || (prompt.mode !== 'move' && !prompt.name.trim())}
-              >
-                {prompt.mode === 'move'
-                  ? 'Move'
-                  : prompt.mode === 'rename'
-                    ? 'Rename'
-                    : prompt.mode === 'copy'
-                      ? 'Save copy'
-                      : 'Create'}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
-      {deleting && (
-        <Modal title="Move to trash" onClose={() => setDeleting(undefined)}>
-          <p>
-            «{title(deleting.path)}»
-            {deleting.kind === 'folder' ? ' and its contents will be moved' : ' will be moved'} to
-            the trash. You can restore it later.
-          </p>
-          <div className="dialog-actions">
-            <button onClick={() => setDeleting(undefined)}>Cancel</button>
-            <button className="danger-button" disabled={busy} onClick={deleteEntry}>
+            </Show>
+            <button
+              class="danger-text"
+              onClick={() => {
+                w.setDeleting(value().entry);
+                closeMenu();
+              }}
+            >
+              <Trash2 size={15} />
               Move to trash
             </button>
           </div>
-        </Modal>
-      )}
-      {trash && (
-        <Modal title="Trash" onClose={() => setTrash(undefined)}>
-          <p className="dialog-help">
-            Files stay here until you restore them. They are not deleted automatically.
-          </p>
-          <div className="version-list">
-            {!trash.length && <p>The trash is empty.</p>}
-            {trash.map((item) => (
-              <div className="version-row" key={item.id}>
-                <div>
-                  <strong>{item.path}</strong>
-                  <small>{displayDate(item.deleted)}</small>
-                </div>
-                <button
-                  aria-label={`Restore ${title(item.path)}`}
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      await api.restore(item.id);
-                      setTrash(await api.listTrash());
-                      await refresh();
-                    })
-                  }
+        )}
+      </Show>
+      <Show when={w.prompt()?.mode === 'copy' && w.prompt()}>
+        {(prompt) => (
+          <Modal
+            title={
+              {
+                move: 'Move to another folder',
+                copy: 'Save a copy',
+              }[prompt().mode]
+            }
+            onClose={() => modalClose(() => w.setPrompt(undefined))}
+          >
+            <form onSubmit={w.submitPrompt}>
+              <Show when={prompt().mode !== 'move'}>
+                <label>
+                  Name
+                  <input
+                    autofocus
+                    required
+                    maxLength={160}
+                    value={prompt().name}
+                    onInput={(e) => w.setPrompt({ ...prompt(), name: e.currentTarget.value })}
+                  />
+                </label>
+              </Show>
+              <label>
+                Folder
+                <select
+                  autofocus={prompt().mode === 'move'}
+                  value={prompt().folder}
+                  onChange={(e) => w.setPrompt({ ...prompt(), folder: e.currentTarget.value })}
                 >
-                  <Undo2 size={15} />
-                  Restore
+                  <option value="">My canvases /</option>
+                  <For
+                    each={w
+                      .folders()
+                      .filter(
+                        (e) =>
+                          prompt().mode !== 'move' ||
+                          (e.path !== prompt().path && !e.path.startsWith(`${prompt().path}/`)),
+                      )}
+                  >
+                    {(entry) => <option value={entry.path}>{entry.path}</option>}
+                  </For>
+                </select>
+              </label>
+              <Show when={prompt().mode === 'copy'}>
+                <p class="dialog-help">
+                  Saves the current drawing as a new file and keeps the server version intact.
+                </p>
+              </Show>
+              <Show when={w.error()}>
+                <p class="form-error" role="alert">
+                  {w.error()}
+                </p>
+              </Show>
+              <div class="dialog-actions">
+                <button type="button" disabled={w.busy()} onClick={() => w.setPrompt(undefined)}>
+                  Cancel
+                </button>
+                <button
+                  class="primary"
+                  disabled={w.busy() || (prompt().mode !== 'move' && !prompt().name.trim())}
+                >
+                  {prompt().mode === 'move' ? 'Move' : 'Save copy'}
                 </button>
               </div>
-            ))}
-          </div>
-          {error && <p className="form-error">{error}</p>}
-        </Modal>
-      )}
-      {history && session && (
-        <Modal title="Version history" onClose={() => setHistory(undefined)}>
-          <p className="dialog-help">
-            The last 20 previous versions of this file. Restoring a version creates a new canvas.
-          </p>
-          <div className="version-list">
-            {!history.length && <p>There are no previous versions yet.</p>}
-            {history.map((item) => (
-              <div className="version-row" key={item.revision}>
-                <Clock3 size={17} />
-                <div>
-                  <strong>{displayDate(item.modified)}</strong>
-                  <small>{item.revision.slice(0, 10)}</small>
-                </div>
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      if (!(await ensureSaved())) return;
-                      const scene = await api.historical(session.document.path, item.revision);
-                      const name = join(
-                        parent(session.document.path),
-                        `${title(session.document.path)} (restored ${Date.now()}).excalidraw`,
-                      );
-                      const doc = await api.create(name, 'file', scene);
-                      await refresh();
-                      await mount(doc);
-                      setHistory(undefined);
-                    })
-                  }
-                >
-                  Restore a copy
-                </button>
-              </div>
-            ))}
-          </div>
-        </Modal>
-      )}
-      {reloadConfirm && (
-        <Modal title="Load the server version" onClose={() => setReloadConfirm(false)}>
+            </form>
+          </Modal>
+        )}
+      </Show>
+      <Show when={w.deleting()}>
+        {(entry) => (
+          <Modal title="Move to trash" onClose={() => modalClose(() => w.setDeleting(undefined))}>
+            <p>
+              Move “{title(entry().path)}”{entry().kind === 'folder' ? ' and its contents' : ''} to
+              the trash? You can restore it later.
+            </p>
+            <div class="dialog-actions">
+              <button disabled={w.busy()} onClick={() => w.setDeleting(undefined)}>
+                Cancel
+              </button>
+              <button class="danger-button" disabled={w.busy()} onClick={w.deleteEntry}>
+                Move to trash
+              </button>
+            </div>
+          </Modal>
+        )}
+      </Show>
+      <Show when={w.trash()}>
+        {(items) => (
+          <Modal title="Trash" onClose={() => modalClose(() => w.setTrash(undefined))}>
+            <div class="version-list">
+              <Show when={items().length} fallback={<p>The trash is empty.</p>}>
+                <For each={items()}>
+                  {(item) => (
+                    <div class="version-row">
+                      <div>
+                        <strong>{item.path}</strong>
+                        <small>{displayDate(item.deleted)}</small>
+                      </div>
+                      <button
+                        disabled={w.busy()}
+                        aria-label={`Restore ${title(item.path)}`}
+                        onClick={() => w.restoreTrash(item.id)}
+                      >
+                        Restore
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </div>
+            <Show when={w.error()}>
+              <p class="form-error">{w.error()}</p>
+            </Show>
+          </Modal>
+        )}
+      </Show>
+      <Show when={w.history()}>
+        {(items) => (
+          <Modal title="Version history" onClose={() => modalClose(() => w.setHistory(undefined))}>
+            <p class="dialog-help">Up to 20 previous versions. Restoring creates a new canvas.</p>
+            <div class="version-list">
+              <Show when={items().length} fallback={<p>There are no previous versions yet.</p>}>
+                <For each={items()}>
+                  {(item) => (
+                    <div class="version-row">
+                      <div>
+                        <strong>{displayDate(item.modified)}</strong>
+                        <small>{item.revision.slice(0, 10)}</small>
+                      </div>
+                      <button disabled={w.busy()} onClick={() => w.restoreHistory(item.revision)}>
+                        Restore a copy
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </div>
+            <Show when={w.error()}>
+              <p class="form-error">{w.error()}</p>
+            </Show>
+          </Modal>
+        )}
+      </Show>
+      <Show when={w.reloadConfirm()}>
+        <Modal
+          title="Load the server version"
+          onClose={() => modalClose(() => w.setReloadConfirm(false))}
+        >
           <p>
-            This replaces the open drawing with the current server file. Save a copy or download
-            your drawing first to keep your local changes.
+            This replaces the open drawing. Save a copy or download it first to keep your local
+            changes.
           </p>
-          <div className="dialog-actions">
+          <div class="dialog-actions">
             <button
+              disabled={w.busy()}
               onClick={() => {
-                setReloadConfirm(false);
+                w.setReloadConfirm(false);
                 ask('copy');
               }}
             >
               Save a copy first
             </button>
-            <button className="danger-button" onClick={reload} disabled={busy}>
+            <button class="danger-button" disabled={w.busy()} onClick={w.reload}>
               Load from server
             </button>
           </div>
-          {error && <p className="form-error">{error}</p>}
+          <Show when={w.error()}>
+            <p class="form-error">{w.error()}</p>
+          </Show>
         </Modal>
-      )}
+      </Show>
     </div>
   );
 }

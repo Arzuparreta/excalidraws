@@ -163,6 +163,20 @@ test('HTTP contract rejects cross-origin writes, malformed JSON, traversal and s
   });
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, 'conflict');
+  const current = await vault.read('X.excalidraw');
+  const accepted = await fetch(`${url}/api/document`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      path: current.path,
+      revision: current.revision,
+      scene: { ...emptyScene(), elements: [{ id: 'saved' }] },
+    }),
+  });
+  const acknowledgment = await accepted.json();
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(Object.keys(acknowledgment), ['revision']);
+  assert.equal(acknowledgment.revision, (await vault.read(current.path)).revision);
   assert.equal((await fetch(`${url}/api/document?path=no.excalidraw`)).status, 404);
 });
 
