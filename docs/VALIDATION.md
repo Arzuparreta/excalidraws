@@ -1,5 +1,23 @@
 # Delivery verification
 
+## Service rebuilds and README screenshot
+
+Verified on November 5, 2026.
+
+- The generated system service builds its installed checkout before starting the
+  server. Its account, paths, network settings, and vault come from the installer.
+  Unit generation also covers checkout paths containing spaces, dollar signs, and
+  systemd specifiers.
+- Startup tests use disposable checkouts and local development dependencies. They
+  cover production-mode build tools, changed sources, changed package files, missing
+  dependencies, dependency installation failures, build failures, and vault preservation.
+- A temporary systemd unit started the real application and rebuilt it on restart;
+  its health PID matched the service's main PID. The second start reused installed
+  dependencies. A separate failed-build unit never executed its server command, and
+  the compilation error appeared in the journal.
+- The README screenshot is a rendered 1440 × 900 dark-mode workspace with the icon
+  navigation and a canvas containing three basic shapes. It uses a disposable vault.
+
 ## Canvas library redesign
 
 Verified on November 4, 2026, after the initial three-member Opus 5.5 design study

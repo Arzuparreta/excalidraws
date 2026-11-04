@@ -11,7 +11,7 @@ The integration uses `@excalidraw/excalidraw` and its public API. The editor rem
 a dependency; this repository adds document management and a file service. It does
 not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
-![Excalidraws workspace with the canvas library and a creative process diagram](docs/screenshots/workspace.png)
+![Excalidraws in dark mode with icon navigation and a canvas containing three basic shapes](docs/screenshots/workspace.png)
 
 ## Usage
 
@@ -110,13 +110,19 @@ The document size limit is 40 MB.
 
 ## System service
 
-The installer creates a release independent of the checkout, installs production dependencies,
-and enables the system-wide `excalidraws.service` at boot. The process runs as the
-non-root account selected by `--service-user` (the invoking sudo user by default).
-Updates back up the previous unit and roll back if the frontend or API check fails. The vault stays outside the releases.
+The installer enables the system-wide `excalidraws.service` at boot and connects it to
+the checkout where you run the installer. Every start or restart builds that checkout
+before starting the server. Dependencies, including build tools, are installed on first
+use and synchronized when the package files or Node version change. An unchanged
+installation can rebuild without downloading dependencies.
+
+Dependency installation and builds run as the non-root account selected by `--service-user`
+(the invoking sudo user by default). That account needs Node, npm, and write access
+to the checkout. Keep the checkout at its installed path; rerun the installer if you
+move it. A failed build prevents the server from starting; inspect the journal for
+the error. The vault stays outside the checkout.
 
 ```sh
-npm run build
 node scripts/install-service.mjs --dry-run --host 0.0.0.0 --port 3000
 # Access from localhost, LAN, and Tailscale:
 sudo node scripts/install-service.mjs --host 0.0.0.0 --port 3000
@@ -125,7 +131,7 @@ sudo node scripts/install-service.mjs --host 0.0.0.0 --port 3000
 ```
 
 The default port is 3000. The default vault is `.local/share/excalidraws/vault` inside
-the service account's home directory; releases are stored beside it. Use `--vault` to
+the service account's home directory. Use `--vault` to
 keep a custom vault location. When running directly as root or through pkexec, specify
 `--service-user username`. The installer never runs the server as root.
 
@@ -136,6 +142,17 @@ previous service user is logged in, and preserve its original `--host`, `--port`
 `--vault`, `--allowed-hosts`, and `--origin` values. The installer does not move or
 rewrite drawings, change other services, or change Tailscale.
 
+To update, pull the latest changes in the installed checkout and restart the service:
+
+```sh
+git pull --ff-only
+sudo systemctl restart excalidraws.service
+```
+
+The restart waits for the build before starting the server. It builds the local files;
+the service does not pull from Git. Existing installations using a copied release need
+to run the installer once with their existing options to enable this behavior.
+
 ```sh
 systemctl status excalidraws
 sudo systemctl restart excalidraws
@@ -145,11 +162,13 @@ journalctl -u excalidraws -f
 The service starts when the machine boots, independently of interactive logins.
 User lingering is not required.
 
-To roll back, copy a previous unit backup to `/etc/systemd/system/excalidraws.service`,
-run `sudo systemctl daemon-reload`, and restart the service.
+To roll back an installer change, copy a previous unit backup to
+`/etc/systemd/system/excalidraws.service`, run `sudo systemctl daemon-reload`, and restart
+the service. To roll back a code update, check out the desired revision in the installed
+checkout and restart; the service builds that revision before starting.
 
 To uninstall, run `sudo systemctl disable --now excalidraws`, remove the unit file,
-and run `sudo systemctl daemon-reload`. You can remove the releases separately;
+and run `sudo systemctl daemon-reload`. You can remove the checkout and old releases separately;
 keep the vault to retain your drawings.
 
 ### Migration and backups

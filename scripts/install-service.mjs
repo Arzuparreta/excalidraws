@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { cp, mkdir, readFile, writeFile, rm, mkdtemp, chown } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, mkdtemp, chown } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +55,7 @@ const host = option('--host', '127.0.0.1');
 const origin = option('--origin', '');
 if (origin && (!/^https?:\/\//.test(origin) || new URL(origin).origin !== origin))
   throw new Error('Origin must be an HTTP(S) origin without a path or trailing slash');
-// Keep the existing personal vault and releases when migrating from the user service.
+// Keep the vault outside the checkout, including when migrating an existing installation.
 const base = path.join(home, '.local/share/excalidraws');
 const vault = path.resolve(option('--vault', path.join(base, 'vault')));
 const unitDirectory = '/etc/systemd/system';
@@ -73,30 +73,26 @@ const userCommand = (arguments_) =>
     encoding: 'utf8',
   });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const release = path.join(base, 'releases', stamp);
 const quote = (value) =>
   `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')}"`;
-for (const value of [
-  release,
-  vault,
-  host,
-  origin,
-  process.execPath,
-  option('--allowed-hosts', ''),
-]) {
+for (const value of [repo, vault, host, origin, process.execPath, option('--allowed-hosts', '')]) {
   if (/[\r\n\x00]/.test(value))
     throw new Error('Service settings cannot contain line breaks or NUL');
 }
 const unit = `[Unit]
 Description=Excalidraws file workspace
 After=network-online.target
+RequiresMountsFor=${quote(repo)} ${quote(vault)}
+StartLimitIntervalSec=15min
+StartLimitBurst=3
 
 [Service]
 Type=simple
 User=${serviceUser}
 Group=${gid}
-WorkingDirectory=${release.replaceAll('%', '%%')}
-ExecStart=${quote(process.execPath).replaceAll('$', '$$')} ${quote(path.join(release, 'dist/server/main.js')).replaceAll('$', '$$')}
+WorkingDirectory=${repo.replaceAll('%', '%%')}
+ExecStartPre=${quote(process.execPath).replaceAll('$', '$$')} ${quote(path.join(repo, 'scripts/prepare-service.mjs')).replaceAll('$', '$$')}
+ExecStart=${quote(process.execPath).replaceAll('$', '$$')} ${quote(path.join(repo, 'dist/server/main.js')).replaceAll('$', '$$')}
 Environment=${quote(`HOST=${host}`)}
 Environment=${quote(`PORT=${port}`)}
 Environment=${quote(`VAULT_DIR=${vault}`)}
@@ -105,6 +101,7 @@ Environment=${quote(`PUBLIC_ORIGIN=${origin}`)}
 Environment=NODE_ENV=production
 Restart=on-failure
 RestartSec=3
+TimeoutStartSec=15min
 TimeoutStopSec=20
 UMask=0077
 NoNewPrivileges=true
@@ -136,20 +133,15 @@ if (args.includes('--dry-run')) {
   console.log(unit);
   process.exit(0);
 }
-await readFile(path.join(repo, 'dist/client/index.html'));
-await readFile(path.join(repo, 'dist/server/main.js'));
-await mkdir(release, { recursive: true });
+await mkdir(base, { recursive: true });
 await chown(base, uid, gid);
-await chown(path.dirname(release), uid, gid);
-await cp(path.join(repo, 'dist'), path.join(release, 'dist'), { recursive: true });
-for (const file of ['package.json', 'package-lock.json'])
-  await cp(path.join(repo, file), path.join(release, file));
-command('chown', ['-R', `${uid}:${gid}`, release]);
 command(
   'runuser',
-  ['-u', serviceUser, '--', 'npm', 'ci', '--omit=dev', '--ignore-scripts', '--no-fund'],
-  release,
+  ['-u', serviceUser, '--', process.execPath, path.join(repo, 'scripts/prepare-service.mjs')],
+  repo,
 );
+await readFile(path.join(repo, 'dist/client/index.html'));
+await readFile(path.join(repo, 'dist/server/main.js'));
 await mkdir(unitDirectory, { recursive: true });
 await mkdir(vault, { recursive: true, mode: 0o700 });
 await chown(vault, uid, gid);
@@ -236,5 +228,5 @@ if (previousUserUnit !== null) {
     console.warn('System service is healthy; reload the user manager on your next login.');
 }
 console.log(
-  `Installed: http://${host}:${port}\nVault: ${vault}\nRelease: ${release}${previous !== null ? `\nPrevious unit: ${backup}` : ''}`,
+  `Installed: http://${host}:${port}\nVault: ${vault}\nCheckout: ${repo}\nThe service rebuilds this checkout on every start.${previous !== null ? `\nPrevious unit: ${backup}` : ''}`,
 );
