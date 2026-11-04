@@ -26,16 +26,16 @@ export function createApp(vault: Vault, clientDirectory?: string) {
       ...(process.env.ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()),
     ];
     if (!hostname || (!isIP(hostname) && !hosts.includes(hostname))) {
-      return res.status(403).json({ error: 'Host no permitido.', code: 'host' });
+      return res.status(403).json({ error: 'Host not allowed.', code: 'host' });
     }
     // No CORS. Also reject cross-origin writes before parsing any document payload.
     const origin = req.get('origin');
     const ownOrigin = process.env.PUBLIC_ORIGIN || `${req.protocol}://${req.get('host')}`;
     if (req.get('sec-fetch-site') === 'cross-site' || (origin && origin !== ownOrigin)) {
-      return res.status(403).json({ error: 'Origen no permitido.', code: 'origin' });
+      return res.status(403).json({ error: 'Origin not allowed.', code: 'origin' });
     }
     if (!['GET', 'HEAD'].includes(req.method) && !req.is('application/json')) {
-      return res.status(415).json({ error: 'Usa application/json.', code: 'content_type' });
+      return res.status(415).json({ error: 'Use application/json.', code: 'content_type' });
     }
     next();
   });
@@ -81,7 +81,7 @@ export function createApp(vault: Vault, clientDirectory?: string) {
     res.json(await vault.historical(getPath(req.query.path), getPath(req.query.revision))),
   );
   app.use('/api', (_req, res) =>
-    res.status(404).json({ error: 'Ruta desconocida.', code: 'not_found' }),
+    res.status(404).json({ error: 'Unknown route.', code: 'not_found' }),
   );
   if (clientDirectory) {
     app.use(express.static(clientDirectory, { index: false, maxAge: '1h' }));
@@ -100,18 +100,18 @@ export function createApp(vault: Vault, clientDirectory?: string) {
       if (error instanceof VaultError)
         return res.status(error.status).json({ error: error.message, code: error.code });
       if (error instanceof ZodError || error instanceof SyntaxError)
-        return res.status(400).json({ error: 'Datos no válidos.', code: 'validation' });
+        return res.status(400).json({ error: 'Invalid data.', code: 'validation' });
       if (error.code === 'ENOENT')
         return res
           .status(404)
-          .json({ error: 'El archivo o la carpeta ya no existe.', code: 'not_found' });
+          .json({ error: 'The file or folder no longer exists.', code: 'not_found' });
       if (error.code === 'EEXIST')
-        return res.status(409).json({ error: 'El nombre ya existe.', code: 'exists' });
+        return res.status(409).json({ error: 'The name already exists.', code: 'exists' });
       if (error.status === 413)
-        return res.status(413).json({ error: 'El documento supera 40 MB.', code: 'too_large' });
+        return res.status(413).json({ error: 'The document exceeds 40 MB.', code: 'too_large' });
       console.error(error);
       res.status(500).json({
-        error: 'No se ha podido completar la operación. Tu dibujo sigue en el editor.',
+        error: 'The operation could not be completed. Your drawing is still open in the editor.',
         code: 'server',
       });
     },

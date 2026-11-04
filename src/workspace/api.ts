@@ -19,7 +19,7 @@ async function request<T>(route: string, body?: unknown, method = 'POST'): Promi
   const data = await response.json();
   if (!response.ok)
     throw new ApiError(
-      data.error ?? 'No se ha podido completar la operación.',
+      data.error ?? 'The operation could not be completed.',
       data.code ?? 'unknown',
       response.status,
     );

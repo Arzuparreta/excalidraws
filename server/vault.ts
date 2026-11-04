@@ -103,7 +103,7 @@ export class Vault {
     )
       throw new VaultError(
         400,
-        'Nombre o ruta no válidos. No uses rutas ocultas, puntos iniciales ni barras inversas.',
+        'Invalid name or path. Do not use hidden paths, leading dots, or backslashes.',
       );
   }
 
@@ -114,7 +114,7 @@ export class Vault {
       current = path.join(current, component);
       try {
         if ((await fs.lstat(current)).isSymbolicLink())
-          throw new VaultError(400, 'No se permiten enlaces simbólicos.');
+          throw new VaultError(400, 'Symbolic links are not allowed.');
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
@@ -126,20 +126,20 @@ export class Vault {
     const parent = path.posix.dirname(relative);
     const absolute = await this.resolve(parent === '.' ? '' : parent, true);
     if (!(await fs.stat(absolute)).isDirectory())
-      throw new VaultError(400, 'La carpeta de destino no existe.');
+      throw new VaultError(400, 'The destination folder does not exist.');
   }
 
   private requireDocument(relative: string) {
     if (!relative.endsWith('.excalidraw'))
-      throw new VaultError(400, 'El archivo debe terminar en .excalidraw.');
+      throw new VaultError(400, 'The filename must end in .excalidraw.');
   }
 
   private async readRaw(absolute: string) {
     const handle = await fs.open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const stat = await handle.stat();
-      if (!stat.isFile()) throw new VaultError(400, 'No es un archivo.');
-      if (stat.size > 40 * 1024 * 1024) throw new VaultError(413, 'El archivo supera 40 MB.');
+      if (!stat.isFile()) throw new VaultError(400, 'Not a file.');
+      if (stat.size > 40 * 1024 * 1024) throw new VaultError(413, 'The file exceeds 40 MB.');
       return await handle.readFile('utf8');
     } finally {
       await handle.close();
@@ -150,14 +150,14 @@ export class Vault {
     try {
       return sceneSchema.parse(JSON.parse(raw));
     } catch {
-      throw new VaultError(422, 'El archivo no contiene una escena Excalidraw válida.');
+      throw new VaultError(422, 'The file does not contain a valid Excalidraw scene.');
     }
   }
 
   private encode(scene: Scene) {
     const raw = JSON.stringify(sceneSchema.parse(scene), null, 2) + '\n';
     if (Buffer.byteLength(raw, 'utf8') > 40 * 1024 * 1024)
-      throw new VaultError(413, 'El documento supera 40 MB.');
+      throw new VaultError(413, 'The document exceeds 40 MB.');
     return raw;
   }
 
@@ -180,7 +180,7 @@ export class Vault {
       }
     };
     await visit('');
-    return entries.sort((a, b) => a.path.localeCompare(b.path, 'es', { numeric: true }));
+    return entries.sort((a, b) => a.path.localeCompare(b.path, 'en', { numeric: true }));
   }
 
   async read(relative: string): Promise<Document> {
@@ -199,7 +199,7 @@ export class Vault {
       const absolute = await this.resolve(relative);
       await this.parent(relative);
       if (await exists(absolute))
-        throw new VaultError(409, 'Ya existe un archivo o carpeta con ese nombre.', 'exists');
+        throw new VaultError(409, 'A file or folder with that name already exists.', 'exists');
       if (kind === 'folder') {
         await fs.mkdir(absolute, { mode: 0o700 });
         return;
@@ -234,11 +234,11 @@ export class Vault {
         old = await this.readRaw(absolute);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === 'ENOENT')
-          throw new VaultError(409, 'El archivo se ha movido o eliminado.', 'conflict');
+          throw new VaultError(409, 'The file has been moved or deleted.', 'conflict');
         throw e;
       }
       if (hash(old) !== revision)
-        throw new VaultError(409, 'El archivo ha cambiado fuera de este editor.', 'conflict');
+        throw new VaultError(409, 'The file has changed outside this editor.', 'conflict');
       const validated = sceneSchema.parse(scene);
       const raw = this.encode(validated);
       if (raw === old) return { path: relative, revision, scene: validated };
@@ -255,7 +255,7 @@ export class Vault {
           await handle.close();
         }
         if (hash(await this.readRaw(absolute).catch(() => '')) !== revision) {
-          throw new VaultError(409, 'El archivo ha cambiado durante el guardado.', 'conflict');
+          throw new VaultError(409, 'The file changed while saving.', 'conflict');
         }
         await fs.rename(temporary, absolute);
         await this.syncDirectory(path.dirname(absolute));
@@ -283,11 +283,12 @@ export class Vault {
       const source = await this.resolve(from);
       const target = await this.resolve(to);
       if (to.startsWith(`${from}/`))
-        throw new VaultError(400, 'No puedes mover una carpeta dentro de sí misma.');
+        throw new VaultError(400, 'You cannot move a folder inside itself.');
       const stat = await fs.lstat(source);
       if (stat.isFile()) this.requireDocument(to);
       await this.parent(to);
-      if (await exists(target)) throw new VaultError(409, 'El destino ya existe.', 'exists');
+      if (await exists(target))
+        throw new VaultError(409, 'The destination already exists.', 'exists');
       await fs.rename(source, target);
     });
   }
@@ -325,7 +326,7 @@ export class Vault {
 
   async restore(id: string, destination?: string) {
     return this.serial(async () => {
-      if (!/^[\da-f-]{36}$/.test(id)) throw new VaultError(400, 'Identificador no válido.');
+      if (!/^[\da-f-]{36}$/.test(id)) throw new VaultError(400, 'Invalid identifier.');
       const directory = path.join(this.root, '.workspace/trash', id);
       const meta = JSON.parse(
         await fs.readFile(path.join(directory, 'meta.json'), 'utf8'),
@@ -335,7 +336,11 @@ export class Vault {
       if (meta.kind === 'file') this.requireDocument(relative);
       await this.parent(relative);
       if (await exists(absolute))
-        throw new VaultError(409, 'El destino ya existe. Restaura con otro nombre.', 'exists');
+        throw new VaultError(
+          409,
+          'The destination already exists. Restore with a different name.',
+          'exists',
+        );
       await fs.rename(path.join(directory, 'content'), absolute);
       await fs.rm(directory, { recursive: true });
       return relative;
@@ -357,7 +362,7 @@ export class Vault {
 
   async historical(relative: string, revision: string) {
     await this.resolve(relative);
-    if (!/^[a-f0-9]{64}$/.test(revision)) throw new VaultError(400, 'Revisión no válida.');
+    if (!/^[a-f0-9]{64}$/.test(revision)) throw new VaultError(400, 'Invalid revision.');
     return this.parse(
       await this.readRaw(
         path.join(this.root, '.workspace/history', hash(relative), `${revision}.excalidraw`),

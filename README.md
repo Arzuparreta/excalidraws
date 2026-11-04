@@ -1,83 +1,90 @@
 # Excalidraws
 
-Excalidraw oficial con un explorador lateral y archivos reales en tu servidor.
-Cada lienzo es un `.excalidraw` independiente: puedes editarlo desde el navegador,
-abrirlo con Excalidraw o incluir la carpeta en tus copias de seguridad.
+The official Excalidraw editor with a sidebar explorer and real files on your server.
+Each canvas is an independent `.excalidraw` file: edit it in your browser, open it
+in Excalidraw, or include its folder in your backups.
 
-Se integra mediante `@excalidraw/excalidraw` y su API pública. No es un fork,
-un userscript ni una extensión instalable sobre excalidraw.com. El editor se mantiene
-como dependencia; este repositorio añade la gestión de documentos y el servicio de archivos.
+The integration uses `@excalidraw/excalidraw` and its public API. The editor remains
+a dependency; this repository adds document management and a file service. It does
+not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
-## Uso
+## Usage
 
-- Crea lienzos y carpetas desde el lateral. Busca por nombre o ruta.
-- El menú `…` permite renombrar, mover y enviar archivos o carpetas a la papelera.
-- El guardado es automático tras 650 ms de pausa. Cambiar de lienzo espera al guardado.
-- Los dibujos incluyen imágenes y conservan desplazamiento y zoom.
-- Importa uno o varios `.excalidraw` sin reemplazar otros archivos. Descárgalos desde la cabecera.
-- La papelera permite restaurar; el historial conserva las últimas 20 versiones anteriores
-  **por ruta**. Recuperar una versión crea un lienzo nuevo.
-- Si el archivo cambia en otro dispositivo o en el disco, se recarga cuando está limpio.
-  Si hay cambios locales, se muestra un conflicto: puedes guardar una copia, descargarla
-  o cargar la versión del servidor. No se sobrescribe automáticamente la otra versión.
+- Create canvases and folders in the sidebar. Search by name or path.
+- Use the `…` menu to rename, move, or send files and folders to the trash.
+- Changes are saved automatically after a 650 ms pause. Switching canvases waits for saving.
+- Drawings include embedded images and retain their scroll position and zoom.
+- Import one or more `.excalidraw` files without replacing existing files. Download a canvas
+  from its header.
+- Restore deleted files from the trash. Version history retains the last 20 previous versions
+  **per path**. Restoring a version creates a new canvas.
+- External changes reload automatically when the editor is clean. If you have local changes,
+  a conflict lets you save a copy, download your drawing, or load the server version.
 
-Es un workspace personal, sin colaboración simultánea ni fusión de dibujos. Los dos
-clientes que editan una misma revisión no pueden guardar ambos sobre ella: el segundo
-recibe un conflicto. Las escrituras externas no cooperan con nuestro bloqueo; se comprueba
-la revisión de nuevo justo antes del rename, pero una herramienta externa que escriba
-exactamente en ese intervalo aún podría competir. Evita editar el mismo archivo a la vez.
+This is a personal workspace with conflict detection. It does not merge simultaneous edits.
+When two clients save against the same revision, the second receives a conflict. External
+file writers do not participate in the service lock. The revision is checked again immediately
+before rename, but an external write in that narrow interval can still race with saving.
+Avoid editing the same file in multiple tools at once.
 
-## Desarrollo
+The workspace and the embedded editor use English. Repository documentation, messages,
+comments, identifiers, filenames, test data, and generated default names also use English.
 
-Requiere Node **22.12 o posterior**, npm y Linux para el instalador systemd.
+## Development
+
+Requires Node **22.12 or later**, npm, and Linux for the systemd installer.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Abre `http://localhost:5173`. Vite conecta con la API en `127.0.0.1:3001`.
-Por defecto los archivos se guardan en `./data/` (ignorado por Git).
+Open `http://localhost:5173`. Vite proxies the API to `127.0.0.1:3001`.
+Files are stored in `./data/` by default, which is ignored by Git.
 
 ```sh
 npm run build
 npm start
 ```
 
-La versión compilada sirve frontend y API en `http://127.0.0.1:3001`.
-Incluye los recursos y fuentes de Excalidraw; no necesita un CDN para el editor.
+The production build serves the frontend and API at `http://127.0.0.1:3001` by default.
+Excalidraw assets and fonts are included; the editor does not require a CDN.
 
-| Variable        | Valor predeterminado | Uso                                         |
-| --------------- | -------------------- | ------------------------------------------- |
-| `VAULT_DIR`     | `./data`             | Carpeta de archivos                         |
-| `HOST`          | `127.0.0.1`          | Dirección de escucha                        |
-| `PORT`          | `3001`               | Puerto HTTP                                 |
-| `ALLOWED_HOSTS` | vacío                | Nombres DNS adicionales separados por comas |
+| Variable        | Default              | Purpose                                   |
+| --------------- | -------------------- | ----------------------------------------- |
+| `VAULT_DIR`     | `./data`             | Document folder                           |
+| `HOST`          | `127.0.0.1`          | Listen address                            |
+| `PORT`          | `3001`               | HTTP port                                 |
+| `ALLOWED_HOSTS` | empty                | Additional DNS names, separated by commas |
+| `PUBLIC_ORIGIN` | incoming HTTP origin | External origin when using an HTTPS proxy |
 
-Se aceptan `localhost`, el hostname del equipo y direcciones IP. Para un nombre DNS de
-Tailscale o un proxy, inclúyelo en `ALLOWED_HOSTS` y conserva Host y Origin al hacer proxy.
-Si el proxy termina HTTPS, configura `PUBLIC_ORIGIN=https://draw.example.com` (instalador: `--origin`).
-La API rechaza orígenes ajenos, rutas ocultas, escapes del vault y enlaces simbólicos.
-No hay cuentas ni autenticación: usa loopback o una red privada de confianza. Si lo expones
-a Internet, coloca autenticación y HTTPS delante. Límite por documento: 40 MB.
+The API accepts `localhost`, the machine hostname, and IP addresses. For a Tailscale DNS
+name or a reverse proxy, add the hostname to `ALLOWED_HOSTS` and preserve Host and Origin.
+If the proxy terminates HTTPS, set `PUBLIC_ORIGIN=https://draw.example.com`
+(installer option: `--origin`).
 
-## Servicio systemd de usuario
+The API rejects foreign origins, hidden paths, traversal outside the vault, and symbolic
+links. There are no accounts or authentication: use loopback or a trusted private network.
+Public deployments need authentication and HTTPS in front of the service.
+The document size limit is 40 MB.
 
-El instalador crea una release independiente del checkout, instala dependencias de
-producción y activa `excalidraws.service`. Las actualizaciones conservan la unidad anterior
-y revierten si falla el chequeo HTTP. El vault permanece fuera de las releases.
+## User systemd service
+
+The installer creates a release independent of the checkout, installs production dependencies,
+and enables `excalidraws.service`. Updates back up the previous unit and roll back if the
+frontend or API check fails. The vault stays outside the releases.
 
 ```sh
 npm run build
 node scripts/install-service.mjs --dry-run --host 0.0.0.0 --port 3000
-# Acceso desde localhost, LAN y Tailscale:
+# Access from localhost, LAN, and Tailscale:
 node scripts/install-service.mjs --host 0.0.0.0 --port 3000
-# Para limitarlo a localhost:
+# To restrict access to localhost:
 # node scripts/install-service.mjs --port 3000
 ```
 
-Por defecto: `~/.local/share/excalidraws/vault`. El instalador respeta `XDG_DATA_HOME`
-y `XDG_CONFIG_HOME`. No modifica el antiguo `excalidraw.service` del contenedor ni Tailscale.
+The default vault is `~/.local/share/excalidraws/vault`. The installer respects
+`XDG_DATA_HOME` and `XDG_CONFIG_HOME`. It does not change other services or Tailscale.
 
 ```sh
 systemctl --user status excalidraws
@@ -85,51 +92,55 @@ systemctl --user restart excalidraws
 journalctl --user -u excalidraws -f
 ```
 
-Arranca con la sesión de usuario. Para ejecutarlo también sin sesión, activa el linger
-del usuario si tu sistema aún no lo tiene (`loginctl enable-linger "$USER"`).
+The service starts with the user session. To run it without an interactive session,
+enable user lingering if needed: `loginctl enable-linger "$USER"`.
 
-Para volver a una release anterior, copia su backup de unidad sobre
-`~/.config/systemd/user/excalidraws.service`, ejecuta `daemon-reload` y reinicia el servicio.
-Para desinstalar: `systemctl --user disable --now excalidraws`, elimina esa unidad y ejecuta
-`daemon-reload`. Elimina las releases si quieres; conserva el vault para conservar tus dibujos.
+To roll back, copy a previous unit backup to `~/.config/systemd/user/excalidraws.service`,
+run `systemctl --user daemon-reload`, and restart the service.
 
-### Migración y copias de seguridad
+To uninstall, run `systemctl --user disable --now excalidraws`, remove the unit file,
+and run `systemctl --user daemon-reload`. You can remove the releases separately;
+keep the vault to retain your drawings.
 
-El frontend estándar guarda en el navegador, no en el servidor. Exporta allí tus dibujos
-como `.excalidraw` e impórtalos aquí. Los datos del navegador de otro puerto no se comparten.
-Este módulo no borra el almacenamiento del frontend anterior.
+### Migration and backups
 
-Haz copia de **todo el vault**, incluida `.workspace/` (historial y papelera). Detén el servicio
-para una copia consistente. Al restaurar una copia con el servicio detenido, elimina solo
-`.workspace/server.lock` si procede: un PID de otro sistema puede coincidir con uno activo.
-No uses una carpeta editable por usuarios no confiables ni varios servidores sobre el mismo
-vault. El bloqueo evita dos instancias locales; no coordina hosts diferentes por NFS.
-El historial basado en ruta comienza de nuevo al mover o renombrar un documento; las versiones
-anteriores permanecen en `.workspace/history` bajo la ruta anterior.
+The standard Excalidraw frontend stores drawings in the browser. Export those drawings as
+`.excalidraw` files and import them here. Browser storage is not shared across ports.
+This workspace does not delete the previous frontend's browser storage.
 
-Los borradores locales se guardan en IndexedDB en cada cambio. Su disponibilidad depende del
-almacenamiento del navegador; el estado «Guardado» indica confirmación del servidor. Mantén
-la página abierta hasta verlo antes de cerrar: el navegador avisa si quedan cambios.
+Back up **the entire vault**, including `.workspace/` for history and trash. Stop the service
+for a consistent backup. When restoring with the service stopped, remove
+`.workspace/server.lock` if necessary: a PID from another machine may match an active process.
+Do not share the vault between multiple servers or let untrusted users edit its contents.
+The lock prevents two local service instances; it does not coordinate multiple hosts over NFS.
 
-## Verificación y actualizaciones
+Moving or renaming a document starts a new history for its path. Previous versions remain
+in `.workspace/history` under the old path's hash.
+
+Local drafts are stored in IndexedDB on every change. Their availability depends on browser
+storage. The “Saved” status confirms that the server accepted the current changes.
+Keep the page open until that status appears; the browser warns about unsaved changes.
+
+## Checks and updates
 
 ```sh
 npm test
 npm run build
-npx playwright install chromium  # solo si no está instalado
+npx playwright install chromium  # Only if Chromium is not installed yet.
 npm run test:e2e
 ```
 
-Las pruebas del servidor y la sesión cubren imágenes, escrituras concurrentes, cambios
-externos, rutas, enlaces simbólicos, papelera, historial, borradores y guardado durante una
-petición en curso. Playwright usa el build real con un vault temporal y prueba el editor,
-cambios rápidos, recarga, conflictos, recuperación offline, importación/exportación y móvil.
-No utiliza el vault personal ni el servicio instalado.
+Server and session tests cover images, concurrent writes, external changes, paths, symbolic
+links, trash, history, drafts, and edits made while a save is in flight. Playwright uses the
+production build with a temporary vault to test drawing, quick switching, reloads, conflicts,
+recovery after save failures, imports, exports, and mobile layouts. These tests do not use
+the personal vault or the installed service.
 
-Las versiones están fijadas en `package.json` y `package-lock.json`. Los overrides resuelven
-avisos conocidos en dependencias transitivas de Excalidraw (nanoid, lodash-es y KaTeX).
-Al actualizar, revisa el changelog del editor y los overrides, ejecuta `npm run check` y
-`npm audit`, y comprueba visualmente dibujo, texto, flechas, imágenes, viewport e importación.
-El adaptador `src/editor/ExcalidrawAdapter.tsx` es la frontera con Excalidraw 0.18.1.
+Versions are pinned in `package.json` and `package-lock.json`. Overrides address known
+advisories in Excalidraw's transitive dependencies: nanoid, lodash-es, and KaTeX.
+When updating, review the editor changelog and overrides, run `npm run check` and `npm audit`,
+and inspect drawing, text, arrows, images, viewport state, and imports.
+`src/editor/ExcalidrawAdapter.tsx` is the integration boundary with Excalidraw 0.18.1.
 
-Arquitectura y decisiones: [docs/PLAN.md](docs/PLAN.md).
+Architecture and decisions: [docs/PLAN.md](docs/PLAN.md).
+Verification evidence: [docs/VALIDATION.md](docs/VALIDATION.md).

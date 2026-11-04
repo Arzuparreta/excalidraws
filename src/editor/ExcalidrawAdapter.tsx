@@ -53,11 +53,11 @@ export function ExcalidrawAdapter({
       initialData={initial}
       onChange={change}
       viewModeEnabled={disabled}
-      langCode="es-ES"
+      langCode="en"
       UIOptions={{ canvasActions: { loadScene: false } }}
     >
       <MainMenu>
-        <MainMenu.Item onSelect={onImport}>Importar como nuevo lienzo…</MainMenu.Item>
+        <MainMenu.Item onSelect={onImport}>Import as a new canvas…</MainMenu.Item>
         <MainMenu.DefaultItems.SaveToActiveFile />
         <MainMenu.DefaultItems.Export />
         <MainMenu.DefaultItems.SaveAsImage />

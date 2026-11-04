@@ -32,7 +32,7 @@ test('round trip preserves images, viewport and unknown scene fields as real JSO
     },
     futureField: { preserve: true },
   };
-  const created = (await vault.create('Ideas/Árbol.excalidraw', 'file', scene))!;
+  const created = (await vault.create('Ideas/🌳 Tree.excalidraw', 'file', scene))!;
   assert.deepEqual((await vault.read(created.path)).scene, scene);
   const saved = await vault.save(created.path, created.revision, {
     ...scene,
@@ -77,7 +77,7 @@ test('folders, rename, move, trash and restoration preserve content and reject c
   await vault.create('Other', 'folder');
   await vault.create('Project/Plan.excalidraw', 'file');
   await vault.move('Project/Plan.excalidraw', 'Other/Roadmap.excalidraw');
-  await assert.rejects(vault.move('Other', 'Other/inside'), /dentro/);
+  await assert.rejects(vault.move('Other', 'Other/inside'), /inside/);
   const trash = await vault.trash('Other');
   assert.equal(
     (await vault.list()).some((e) => e.path.startsWith('Other')),
@@ -85,7 +85,7 @@ test('folders, rename, move, trash and restoration preserve content and reject c
   );
   assert.equal((await vault.listTrash()).length, 1);
   await vault.create('Other', 'folder');
-  await assert.rejects(vault.restore(trash.id), /existe/);
+  await assert.rejects(vault.restore(trash.id), /exists/);
   await vault.restore(trash.id, 'Recovered');
   assert.equal((await vault.read('Recovered/Roadmap.excalidraw')).scene.type, 'excalidraw');
   assert.equal((await vault.listTrash()).length, 0);
@@ -107,9 +107,9 @@ test('traversal, absolute/hidden paths, symlinks and non-scenes are refused', as
   const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'outside-'));
   t.after(() => fs.rm(outside, { recursive: true, force: true }));
   await fs.symlink(outside, path.join(root, 'Link'));
-  await assert.rejects(vault.create('Link/escape.excalidraw', 'file'), /simbólicos/);
+  await assert.rejects(vault.create('Link/escape.excalidraw', 'file'), /Symbolic links/);
   await fs.writeFile(path.join(root, 'invalid.excalidraw'), '{}');
-  await assert.rejects(vault.read('invalid.excalidraw'), /válida/);
+  await assert.rejects(vault.read('invalid.excalidraw'), /valid/);
   assert.equal(
     (await vault.list()).some((e) => e.path === 'Link'),
     false,

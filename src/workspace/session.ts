@@ -45,8 +45,8 @@ export class DocumentSession {
         dirty: true,
         status: conflict ? 'conflict' : 'pending',
         message: conflict
-          ? 'El borrador recuperado y el archivo tienen versiones diferentes.'
-          : 'Borrador recuperado de este navegador.',
+          ? 'The recovered draft and the file have different versions.'
+          : 'Draft recovered from this browser.',
       };
       if (!conflict) this.schedule();
     }
@@ -67,7 +67,7 @@ export class DocumentSession {
       status: 'conflict',
       dirty: true,
       message:
-        'El archivo se ha movido, eliminado o ya no se puede abrir. Conservamos tu dibujo aquí.',
+        'The file has been moved, deleted, or can no longer be opened. Your drawing is preserved here.',
     });
     void this.persist();
   }
@@ -136,8 +136,8 @@ export class DocumentSession {
         this.update({
           status: conflict ? 'conflict' : 'offline',
           message: conflict
-            ? 'El archivo ha cambiado o se ha movido. Conservamos tu dibujo aquí.'
-            : 'No se ha podido guardar en el servidor. Reintenta cuando vuelva la conexión.',
+            ? 'The file has changed or moved. Your drawing is preserved here.'
+            : 'Could not save to the server. Retry when the connection is restored.',
         });
         await this.persist();
         return false;
@@ -159,7 +159,7 @@ export class DocumentSession {
         clearTimeout(this.timer);
         this.update({
           status: 'conflict',
-          message: 'Hay una modificación externa y cambios locales sin guardar.',
+          message: 'The file has changed externally, and you have unsaved local changes.',
         });
         return;
       }

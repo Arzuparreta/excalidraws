@@ -46,7 +46,7 @@ const title = (path: string) => basename(path).replace(/\.excalidraw$/, '');
 const parent = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 const join = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);
 const displayDate = (value: string) =>
-  new Date(value).toLocaleString('es', {
+  new Date(value).toLocaleString('en', {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',
@@ -95,7 +95,7 @@ function Modal({
     >
       <div className="dialog-heading">
         <h2>{title}</h2>
-        <button className="icon-button" aria-label="Cerrar diálogo" onClick={onClose}>
+        <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
           <X size={18} />
         </button>
       </div>
@@ -175,7 +175,7 @@ export function Workspace() {
     try {
       await operation();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se ha podido completar la operación.');
+      setError(e instanceof Error ? e.message : 'The operation could not be completed.');
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -269,7 +269,7 @@ export function Workspace() {
         mode === 'rename' && path
           ? title(path)
           : mode === 'copy' && session
-            ? `${title(session.document.path)} (copia)`
+            ? `${title(session.document.path)} (copy)`
             : '',
       folder: path ? parent(path) : selectedFolder,
     });
@@ -280,9 +280,9 @@ export function Workspace() {
     void run(async () => {
       const { mode, path, folder } = prompt;
       const name = prompt.name.trim();
-      if (!name && mode !== 'move') throw new Error('Escribe un nombre.');
+      if (!name && mode !== 'move') throw new Error('Enter a name.');
       if (mode !== 'move' && /[/\\]/.test(name))
-        throw new Error('El nombre no puede incluir barras. Elige la carpeta en el selector.');
+        throw new Error('The name cannot contain slashes. Choose a folder from the list.');
       if (mode === 'copy') {
         const current = sessionRef.current;
         if (!current) return;
@@ -374,7 +374,7 @@ export function Workspace() {
       if (!(await ensureSaved())) return;
       let last: Document | undefined;
       for (const file of importedFiles) {
-        if (file.size > 40 * 1024 * 1024) throw new Error('El archivo supera 40 MB.');
+        if (file.size > 40 * 1024 * 1024) throw new Error('The file exceeds 40 MB.');
         const scene = await importScene(file);
         const original = file.name.replace(/\.excalidraw$|\.json$/g, '');
         let suffix = 0;
@@ -465,12 +465,12 @@ export function Workspace() {
                 )}
                 <span>{isFolder ? basename(entry.path) : title(entry.path)}</span>
                 {!isFolder && active && state.dirty && (
-                  <span className="dirty-dot" aria-label="Cambios sin guardar" />
+                  <span className="dirty-dot" aria-label="Unsaved changes" />
                 )}
               </button>
               <button
                 className="row-menu icon-button"
-                aria-label={`Acciones de ${title(entry.path)}`}
+                aria-label={`Actions for ${title(entry.path)}`}
                 aria-expanded={menu === entry.path}
                 onClick={() => setMenu(menu === entry.path ? undefined : entry.path)}
               >
@@ -482,11 +482,11 @@ export function Workspace() {
                 <span className="entry-action-name">{title(entry.path)}</span>
                 <button onClick={() => ask('rename', entry.path)}>
                   <Pencil size={14} />
-                  Renombrar
+                  Rename
                 </button>
                 <button onClick={() => ask('move', entry.path)}>
                   <ArrowRight size={14} />
-                  Mover a…
+                  Move to…
                 </button>
                 <button
                   className="danger-text"
@@ -495,7 +495,8 @@ export function Workspace() {
                     setMenu(undefined);
                   }}
                 >
-                  <Trash2 size={14} />A la papelera
+                  <Trash2 size={14} />
+                  Move to trash
                 </button>
               </div>
             )}
@@ -505,11 +506,11 @@ export function Workspace() {
       });
 
   const statusLabels = {
-    saved: 'Guardado',
-    pending: 'Cambios pendientes',
-    saving: 'Guardando…',
-    offline: 'Sin guardar',
-    conflict: 'Conflicto',
+    saved: 'Saved',
+    pending: 'Pending changes',
+    saving: 'Saving…',
+    offline: 'Not saved',
+    conflict: 'Conflict',
   };
   return (
     <div className="workspace">
@@ -520,29 +521,26 @@ export function Workspace() {
         multiple
         hidden
         onChange={(event) => onImport(event.target.files)}
-        aria-label="Importar archivos"
+        aria-label="Import files"
       />
       {mobileOpen && (
         <button
           className="sidebar-scrim"
-          aria-label="Cerrar explorador"
+          aria-label="Close explorer"
           onClick={() => setMobileOpen(false)}
         />
       )}
-      <aside
-        className={`sidebar ${mobileOpen ? 'is-open' : ''}`}
-        aria-label="Explorador de lienzos"
-      >
+      <aside className={`sidebar ${mobileOpen ? 'is-open' : ''}`} aria-label="Canvas explorer">
         <div className="brand">
           <span className="brand-icon">
             <Shapes size={23} strokeWidth={1.6} />
           </span>
           <span>
-            excalidraws<span className="brand-caption">UN ESPACIO PARA TUS IDEAS</span>
+            excalidraws<span className="brand-caption">A SPACE FOR YOUR IDEAS</span>
           </span>
           <button
             className="icon-button mobile-only"
-            aria-label="Cerrar lateral"
+            aria-label="Close sidebar"
             onClick={() => setMobileOpen(false)}
           >
             <X size={18} />
@@ -550,22 +548,18 @@ export function Workspace() {
         </div>
         <button className="primary new-canvas" onClick={() => ask('file')} disabled={busy}>
           <Plus size={18} />
-          Nuevo lienzo<span>↵</span>
+          New canvas<span>↵</span>
         </button>
         <div className="search">
           <Search size={16} />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar un lienzo…"
-            aria-label="Buscar lienzos"
+            placeholder="Search canvases…"
+            aria-label="Search canvases"
           />
           {search && (
-            <button
-              className="icon-button"
-              aria-label="Limpiar búsqueda"
-              onClick={() => setSearch('')}
-            >
+            <button className="icon-button" aria-label="Clear search" onClick={() => setSearch('')}>
               <X size={13} />
             </button>
           )}
@@ -575,13 +569,13 @@ export function Workspace() {
             className={selectedFolder === '' ? 'root-selected' : ''}
             onClick={() => setSelectedFolder('')}
           >
-            MIS LIENZOS
+            MY CANVASES
           </button>
           <div>
             <button
               className="icon-button"
-              aria-label="Nueva carpeta"
-              title="Nueva carpeta"
+              aria-label="New folder"
+              title="New folder"
               onClick={() => ask('folder')}
               disabled={busy}
             >
@@ -589,8 +583,8 @@ export function Workspace() {
             </button>
             <button
               className="icon-button"
-              aria-label="Importar lienzos"
-              title="Importar .excalidraw"
+              aria-label="Import canvases"
+              title="Import .excalidraw"
               onClick={() => importRef.current?.click()}
               disabled={busy}
             >
@@ -598,27 +592,27 @@ export function Workspace() {
             </button>
           </div>
         </div>
-        <nav className="file-tree" aria-label="Archivos">
+        <nav className="file-tree" aria-label="Files">
           {renderTree('')}
           {loaded && !entries.length && (
             <p className="tree-empty">
-              Aquí vivirán tus ideas.
+              Your ideas will live here.
               <br />
-              Crea tu primer lienzo para empezar.
+              Create your first canvas to get started.
             </p>
           )}
           {search &&
             !entries.some((e) =>
               e.path.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-            ) && <p className="tree-empty">No hay lienzos con ese nombre.</p>}
+            ) && <p className="tree-empty">No canvases match that name.</p>}
         </nav>
         {selectedFolder && (
           <div className="destination" title={selectedFolder}>
             <FolderOpen size={13} />
-            Crear en {basename(selectedFolder)}
+            Create in {basename(selectedFolder)}
             <button
               className="icon-button"
-              aria-label="Crear en raíz"
+              aria-label="Create in root"
               onClick={() => setSelectedFolder('')}
             >
               <X size={12} />
@@ -628,11 +622,11 @@ export function Workspace() {
         <div className="sidebar-bottom">
           <button onClick={() => void run(async () => setTrash(await api.listTrash()))}>
             <Trash2 size={16} />
-            Papelera
+            Trash
           </button>
           <div className="vault-note">
             <span className="connection-dot" />
-            Archivos en tu servidor<span>.excalidraw</span>
+            Files on your server<span>.excalidraw</span>
           </div>
         </div>
       </aside>
@@ -640,7 +634,7 @@ export function Workspace() {
         <header className="topbar">
           <button
             className="icon-button mobile-only"
-            aria-label="Abrir explorador"
+            aria-label="Open explorer"
             onClick={() => setMobileOpen(true)}
           >
             <Menu size={20} />
@@ -648,7 +642,7 @@ export function Workspace() {
           <div className="breadcrumbs">
             <LayoutPanelLeft size={16} />
             <span className="breadcrumb-parent">
-              {session ? parent(session.document.path) || 'Mis lienzos' : 'Mis lienzos'}
+              {session ? parent(session.document.path) || 'My canvases' : 'My canvases'}
             </span>
             {session && (
               <>
@@ -662,7 +656,7 @@ export function Workspace() {
               <span
                 className={`save-status ${state.status}`}
                 role="status"
-                title={state.message || 'Guardado en el servidor'}
+                title={state.message || 'Saved to the server'}
               >
                 {state.status === 'saved' ? (
                   <Check size={14} />
@@ -678,8 +672,8 @@ export function Workspace() {
               <span className="tool-separator" />
               <button
                 className="icon-button"
-                title="Historial de versiones"
-                aria-label="Historial de versiones"
+                title="Version history"
+                aria-label="Version history"
                 onClick={() =>
                   void run(async () => {
                     if (await ensureSaved()) setHistory(await api.history(session.document.path));
@@ -690,16 +684,16 @@ export function Workspace() {
               </button>
               <button
                 className="icon-button"
-                title="Descargar .excalidraw"
-                aria-label="Descargar lienzo"
+                title="Download .excalidraw"
+                aria-label="Download canvas"
                 onClick={download}
               >
                 <ArrowDownToLine size={17} />
               </button>
               <button
                 className="icon-button"
-                title="Renombrar lienzo"
-                aria-label="Renombrar lienzo"
+                title="Rename canvas"
+                aria-label="Rename canvas"
                 onClick={() => ask('rename', session.document.path)}
               >
                 <Pencil size={16} />
@@ -721,17 +715,17 @@ export function Workspace() {
                   });
               }}
             >
-              Reintentar
+              Retry
             </button>
-            <button className="icon-button" aria-label="Cerrar error" onClick={() => setError('')}>
+            <button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}>
               <X size={16} />
             </button>
           </div>
         )}
         {state.localError && (
           <div className="notice warning" role="alert">
-            El navegador no permite guardar el borrador local. Mantén esta página abierta hasta ver
-            «Guardado».
+            Your browser cannot save a local draft. Keep this page open until the status shows
+            “Saved”.
           </div>
         )}
         {session && (state.status === 'conflict' || state.status === 'offline') && (
@@ -739,13 +733,13 @@ export function Workspace() {
             <TriangleAlert size={18} />
             <span>{state.message}</span>
             {state.status === 'offline' ? (
-              <button onClick={() => void session.flush()}>Reintentar guardado</button>
+              <button onClick={() => void session.flush()}>Retry saving</button>
             ) : (
-              <button onClick={() => setReloadConfirm(true)}>Cargar del servidor</button>
+              <button onClick={() => setReloadConfirm(true)}>Load from server</button>
             )}
-            <button onClick={() => ask('copy')}>Guardar una copia</button>
+            <button onClick={() => ask('copy')}>Save a copy</button>
             <button className="text-button" onClick={download}>
-              Descargar
+              Download
             </button>
           </div>
         )}
@@ -765,38 +759,38 @@ export function Workspace() {
                 <span className="art-dot" />
                 <span className="art-line" />
               </div>
-              <span className="eyebrow">DEJA ESPACIO A TUS IDEAS</span>
-              <h1>Todo empieza con un trazo.</h1>
+              <span className="eyebrow">MAKE ROOM FOR YOUR IDEAS</span>
+              <h1>It all starts with a line.</h1>
               <p>
-                Un lugar para dibujar, conectar ideas y pensar en voz alta.
+                A place to draw, connect ideas, and think out loud.
                 <br />
-                Cada lienzo, un archivo. Siempre a mano.
+                Every canvas, a file. Always within reach.
               </p>
               <button className="primary" onClick={() => ask('file')} disabled={busy}>
                 <FilePlus2 size={18} />
-                Crear mi primer lienzo
+                Create my first canvas
               </button>
               <button
                 className="text-button import-welcome"
                 onClick={() => importRef.current?.click()}
                 disabled={busy}
               >
-                O importar un archivo .excalidraw <ArrowRight size={14} />
+                Or import an .excalidraw file <ArrowRight size={14} />
               </button>
               <div className="welcome-features">
                 <span>
                   <Check size={14} />
-                  Guardado automático
+                  Automatic saving
                 </span>
                 <span>
                   <Folder size={14} />
-                  Tus archivos, en tu servidor
+                  Your files, on your server
                 </span>
               </div>
             </div>
           )}
           {busy && (
-            <div className="busy-overlay" aria-label="Procesando">
+            <div className="busy-overlay" aria-label="Processing">
               <LoaderCircle size={24} className="spin" />
             </div>
           )}
@@ -807,11 +801,11 @@ export function Workspace() {
         <Modal
           title={
             {
-              file: 'Nuevo lienzo',
-              folder: 'Nueva carpeta',
-              rename: 'Renombrar',
-              move: 'Mover a otra carpeta',
-              copy: 'Guardar una copia',
+              file: 'New canvas',
+              folder: 'New folder',
+              rename: 'Rename',
+              move: 'Move to another folder',
+              copy: 'Save a copy',
             }[prompt.mode]
           }
           onClose={() => {
@@ -821,16 +815,14 @@ export function Workspace() {
           <form onSubmit={submitPrompt}>
             {prompt.mode !== 'move' && (
               <label>
-                Nombre
+                Name
                 <input
                   autoFocus
                   required
                   maxLength={160}
                   value={prompt.name}
                   placeholder={
-                    prompt.mode === 'folder'
-                      ? 'Por ejemplo, Proyectos'
-                      : 'Por ejemplo, Una nueva idea'
+                    prompt.mode === 'folder' ? 'For example, Projects' : 'For example, A new idea'
                   }
                   onChange={(e) => setPrompt({ ...prompt, name: e.target.value })}
                 />
@@ -838,13 +830,13 @@ export function Workspace() {
             )}
             {prompt.mode !== 'rename' && (
               <label>
-                Carpeta
+                Folder
                 <select
                   autoFocus={prompt.mode === 'move'}
                   value={prompt.folder}
                   onChange={(e) => setPrompt({ ...prompt, folder: e.target.value })}
                 >
-                  <option value="">Mis lienzos /</option>
+                  <option value="">My canvases /</option>
                   {folders
                     .filter(
                       (e) =>
@@ -861,8 +853,8 @@ export function Workspace() {
             )}
             {prompt.mode === 'copy' && (
               <p className="dialog-help">
-                Tu dibujo actual se guardará en un archivo nuevo. El archivo del servidor conservará
-                su versión.
+                Your current drawing will be saved as a new file. The server file will keep its
+                current version.
               </p>
             )}
             {error && (
@@ -872,46 +864,46 @@ export function Workspace() {
             )}
             <div className="dialog-actions">
               <button type="button" onClick={() => setPrompt(undefined)} disabled={busy}>
-                Cancelar
+                Cancel
               </button>
               <button
                 className="primary"
                 disabled={busy || (prompt.mode !== 'move' && !prompt.name.trim())}
               >
                 {prompt.mode === 'move'
-                  ? 'Mover'
+                  ? 'Move'
                   : prompt.mode === 'rename'
-                    ? 'Renombrar'
+                    ? 'Rename'
                     : prompt.mode === 'copy'
-                      ? 'Guardar copia'
-                      : 'Crear'}
+                      ? 'Save copy'
+                      : 'Create'}
               </button>
             </div>
           </form>
         </Modal>
       )}
       {deleting && (
-        <Modal title="Mover a la papelera" onClose={() => setDeleting(undefined)}>
+        <Modal title="Move to trash" onClose={() => setDeleting(undefined)}>
           <p>
             «{title(deleting.path)}»
-            {deleting.kind === 'folder' ? ' y su contenido se moverán' : ' se moverá'} a la
-            papelera. Podrás restaurarlo después.
+            {deleting.kind === 'folder' ? ' and its contents will be moved' : ' will be moved'} to
+            the trash. You can restore it later.
           </p>
           <div className="dialog-actions">
-            <button onClick={() => setDeleting(undefined)}>Cancelar</button>
+            <button onClick={() => setDeleting(undefined)}>Cancel</button>
             <button className="danger-button" disabled={busy} onClick={deleteEntry}>
-              Mover a la papelera
+              Move to trash
             </button>
           </div>
         </Modal>
       )}
       {trash && (
-        <Modal title="Papelera" onClose={() => setTrash(undefined)}>
+        <Modal title="Trash" onClose={() => setTrash(undefined)}>
           <p className="dialog-help">
-            Los archivos permanecen aquí hasta que los restaures. No se borran automáticamente.
+            Files stay here until you restore them. They are not deleted automatically.
           </p>
           <div className="version-list">
-            {!trash.length && <p>La papelera está vacía.</p>}
+            {!trash.length && <p>The trash is empty.</p>}
             {trash.map((item) => (
               <div className="version-row" key={item.id}>
                 <div>
@@ -919,7 +911,7 @@ export function Workspace() {
                   <small>{displayDate(item.deleted)}</small>
                 </div>
                 <button
-                  aria-label={`Restaurar ${title(item.path)}`}
+                  aria-label={`Restore ${title(item.path)}`}
                   disabled={busy}
                   onClick={() =>
                     void run(async () => {
@@ -930,7 +922,7 @@ export function Workspace() {
                   }
                 >
                   <Undo2 size={15} />
-                  Restaurar
+                  Restore
                 </button>
               </div>
             ))}
@@ -939,13 +931,12 @@ export function Workspace() {
         </Modal>
       )}
       {history && session && (
-        <Modal title="Historial de versiones" onClose={() => setHistory(undefined)}>
+        <Modal title="Version history" onClose={() => setHistory(undefined)}>
           <p className="dialog-help">
-            Últimas 20 versiones anteriores de este archivo. Recuperar una versión crea un lienzo
-            nuevo.
+            The last 20 previous versions of this file. Restoring a version creates a new canvas.
           </p>
           <div className="version-list">
-            {!history.length && <p>Todavía no hay versiones anteriores.</p>}
+            {!history.length && <p>There are no previous versions yet.</p>}
             {history.map((item) => (
               <div className="version-row" key={item.revision}>
                 <Clock3 size={17} />
@@ -961,7 +952,7 @@ export function Workspace() {
                       const scene = await api.historical(session.document.path, item.revision);
                       const name = join(
                         parent(session.document.path),
-                        `${title(session.document.path)} (recuperado ${Date.now()}).excalidraw`,
+                        `${title(session.document.path)} (restored ${Date.now()}).excalidraw`,
                       );
                       const doc = await api.create(name, 'file', scene);
                       await refresh();
@@ -970,7 +961,7 @@ export function Workspace() {
                     })
                   }
                 >
-                  Recuperar copia
+                  Restore a copy
                 </button>
               </div>
             ))}
@@ -978,10 +969,10 @@ export function Workspace() {
         </Modal>
       )}
       {reloadConfirm && (
-        <Modal title="Cargar la versión del servidor" onClose={() => setReloadConfirm(false)}>
+        <Modal title="Load the server version" onClose={() => setReloadConfirm(false)}>
           <p>
-            Se reemplazará el dibujo abierto por el archivo actual del servidor. Guarda una copia o
-            descárgalo primero si quieres conservar tus cambios locales.
+            This replaces the open drawing with the current server file. Save a copy or download
+            your drawing first to keep your local changes.
           </p>
           <div className="dialog-actions">
             <button
@@ -990,10 +981,10 @@ export function Workspace() {
                 ask('copy');
               }}
             >
-              Guardar copia primero
+              Save a copy first
             </button>
             <button className="danger-button" onClick={reload} disabled={busy}>
-              Cargar del servidor
+              Load from server
             </button>
           </div>
           {error && <p className="form-error">{error}</p>}
