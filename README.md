@@ -4,15 +4,39 @@ The official Excalidraw editor with a sidebar explorer and real files on your se
 Each canvas is an independent `.excalidraw` file: edit it in your browser, open it
 in Excalidraw, or include its folder in your backups.
 
+The workspace is built with Solid.js and Vite. The official React editor is an isolated,
+lazy-loaded component; React does not render the sidebar, navigation, or dialogs.
+
 The integration uses `@excalidraw/excalidraw` and its public API. The editor remains
 a dependency; this repository adds document management and a file service. It does
 not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
 ## Usage
 
-- Create canvases and folders in the sidebar. Search by name or path.
-- Use the `…` menu to rename, move, or send files and folders to the trash.
-- Changes are saved automatically after a 650 ms pause. Switching canvases waits for saving.
+- Create canvases and folders with one click in the sidebar. They are saved immediately as
+  `Untitled canvas` or `Untitled folder`, followed by `(1)`, `(2)`, etc. when needed. Names
+  are unique within the destination folder, including when another client creates one first.
+- Click the pencil beside a canvas or folder name in the sidebar to rename it in place.
+  The canvas header also has a pencil beside its title. Both locations share a live name
+  draft: typing updates the other view immediately, without renaming the file per keystroke.
+  You can also use the `…` menu or press F2 on a focused explorer row. Edit names in place: Enter or the checkmark saves,
+  Escape cancels, and leaving the field saves. New folders offer inline naming immediately;
+  cancelling keeps the folder with its default name.
+- The “Creating in” line shows where new items will go. Select a folder to create inside it,
+  or use its reset button to return to My canvases. Creating a folder keeps the current
+  destination so repeated clicks create siblings. Search by name or path.
+- The active canvas stays at the top of the sidebar. Sort other canvases by recent changes
+  or name, collapse folders, and use the back/forward buttons to revisit opened canvases.
+- Use Ctrl/Cmd+K to focus search. Hide the sidebar for more drawing space; on small screens,
+  it opens as a drawer with keyboard focus contained inside it.
+- Use the `…` menu to rename, move, or send files and folders to the trash. Moving uses a
+  folder picker inside the sidebar. Renaming or moving an open canvas (or its parent folder)
+  preserves the mounted editor, drawing, viewport, and undo/redo history.
+- Changes are saved automatically after a short pause. Continuous changes schedule a save
+  within four seconds. Switching canvases flushes the current drawing before loading another.
+- Rapid selections cancel obsolete loads and open the last requested canvas. Failed loads
+  leave the current drawing intact. Only one editor is mounted; inactive canvases do not
+  keep live renderers or image caches. Switching resets the editor's undo/redo history.
 - Drawings include embedded images and retain their scroll position and zoom.
 - Import one or more `.excalidraw` files without replacing existing files. Download a canvas
   from its header.
@@ -117,9 +141,16 @@ The lock prevents two local service instances; it does not coordinate multiple h
 Moving or renaming a document starts a new history for its path. Previous versions remain
 in `.workspace/history` under the old path's hash.
 
-Local drafts are stored in IndexedDB on every change. Their availability depends on browser
-storage. The “Saved” status confirms that the server accepted the current changes.
+Local draft writes are grouped over 250 ms; editor snapshots are also coalesced. Switching,
+exporting, and hiding the page flush pending editor snapshots. Draft availability depends
+on browser storage. The “Saved” status confirms that the server accepted the current changes,
+including any pending editor snapshot.
 Keep the page open until that status appears; the browser warns about unsaved changes.
+
+The sidebar virtualizes long lists. A shared filesystem watcher notifies visible clients
+of changes over server-sent events instead of repeatedly polling documents or scanning the
+vault. Hidden pages disconnect and check for changes when visible again. Changes made by
+external tools are detected, but concurrent edits are still resolved as conflicts, not merged.
 
 ## Checks and updates
 
@@ -133,7 +164,8 @@ npm run test:e2e
 Server and session tests cover images, concurrent writes, external changes, paths, symbolic
 links, trash, history, drafts, and edits made while a save is in flight. Playwright uses the
 production build with a temporary vault to test drawing, quick switching, reloads, conflicts,
-recovery after save failures, imports, exports, and mobile layouts. These tests do not use
+recovery after save failures, imports, exports, mobile layouts, obsolete-load cancellation,
+idle network activity, and a library of 300 canvases. These tests do not use
 the personal vault or the installed service.
 
 Versions are pinned in `package.json` and `package-lock.json`. Overrides address known

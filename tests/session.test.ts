@@ -145,3 +145,145 @@ test('a clean file removed externally becomes a recoverable draft', async () => 
   assert.equal(storage.values.get('test.excalidraw')?.scene.elements[0].id, 'preserve-me');
   session.dispose();
 });
+
+test('rapid changes coalesce local drafts and a flush checkpoints the latest scene', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const storage = store();
+  let writes = 0;
+  const originalWrite = storage.write;
+  storage.write = async (path, draft) => {
+    writes++;
+    await originalWrite(path, draft);
+  };
+  const session = new DocumentSession(
+    doc(),
+    {
+      save: async (path, _revision, value) => ({ path, revision: 'saved', scene: value }),
+      revision: async () => ({ revision: 'base' }),
+      read: async () => doc(),
+    },
+    storage,
+  );
+  for (let i = 0; i < 100; i++) session.change(scene(`change-${i}`));
+  assert.equal(writes, 0);
+  t.mock.timers.tick(250);
+  await Promise.resolve();
+  assert.equal(writes, 1);
+  assert.equal(storage.values.get('test.excalidraw')?.scene.elements[0].id, 'change-99');
+  session.change(scene('last-before-switch'));
+  assert.equal(await session.flush(), true);
+  assert.equal(storage.values.size, 0);
+  session.dispose();
+});
+
+test('continuous changes have a bounded server-save delay', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const saved: string[] = [];
+  const session = new DocumentSession(
+    doc(),
+    {
+      save: async (path, _revision, value) => {
+        saved.push(value.elements[0].id as string);
+        return { path, revision: 'saved', scene: value };
+      },
+      revision: async () => ({ revision: 'base' }),
+      read: async () => doc(),
+    },
+    store(),
+  );
+  for (let i = 0; i < 8; i++) {
+    session.change(scene(`stroke-${i}`));
+    t.mock.timers.tick(500);
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+  assert.equal(saved.length, 1);
+  await session.flush();
+  assert.equal(saved.at(-1), 'stroke-7');
+  assert.ok(saved.length >= 1);
+  session.dispose();
+});
+
+test('relocation keeps the scene and revision and routes later saves to the new path', async () => {
+  const calls: { path: string; revision: string }[] = [];
+  const storage = store();
+  const session = new DocumentSession(
+    doc(),
+    {
+      save: async (path, revision) => {
+        calls.push({ path, revision });
+        return { revision: `saved-${calls.length}` };
+      },
+      revision: async () => ({ revision: 'base' }),
+      read: async () => doc(),
+    },
+    storage,
+  );
+  const initial = session.initialScene;
+  session.change(scene('before'));
+  assert.throws(() => session.relocate('Plans/Renamed.excalidraw'));
+  await session.flush();
+  session.relocate('Plans/Renamed.excalidraw');
+  assert.equal(session.initialScene, initial);
+  assert.equal(session.getScene().elements[0].id, 'before');
+  session.change(scene('after'));
+  await session.flush();
+  assert.deepEqual(calls, [
+    { path: 'test.excalidraw', revision: 'base' },
+    { path: 'Plans/Renamed.excalidraw', revision: 'saved-1' },
+  ]);
+  assert.equal(storage.values.size, 0);
+  session.dispose();
+});
+
+test('a stale external check cannot mark a relocated document as missing', async () => {
+  let reject!: (error: Error) => void;
+  const gate = new Promise<{ revision: string }>((_, fail) => {
+    reject = fail;
+  });
+  const session = new DocumentSession(
+    doc(),
+    {
+      save: async () => ({ revision: 'saved' }),
+      revision: () => gate,
+      read: async () => doc(),
+    },
+    store(),
+  );
+  const checking = session.checkExternal();
+  session.relocate('Renamed.excalidraw');
+  reject(new ApiError('Missing', 'not_found', 404));
+  await checking;
+  assert.equal(session.snapshot().status, 'saved');
+  session.dispose();
+});
+
+test('snapshots arriving during a move wait and save to its destination; failed moves resume the original path', async () => {
+  const paths: string[] = [];
+  const session = new DocumentSession(
+    doc(),
+    {
+      save: async (path) => {
+        paths.push(path);
+        return { revision: `saved-${paths.length}` };
+      },
+      revision: async () => ({ revision: 'base' }),
+      read: async () => doc(),
+    },
+    store(),
+  );
+  const resumeMove = session.pauseSaving();
+  session.change(scene('during-move'));
+  assert.equal(await session.flush(), false);
+  assert.deepEqual(paths, []);
+  session.relocate('Moved.excalidraw');
+  resumeMove();
+  assert.equal(await session.flush(), true);
+  assert.deepEqual(paths, ['Moved.excalidraw']);
+  const resumeFailure = session.pauseSaving();
+  session.change(scene('during-failed-move'));
+  resumeFailure();
+  assert.equal(await session.flush(), true);
+  assert.deepEqual(paths, ['Moved.excalidraw', 'Moved.excalidraw']);
+  session.dispose();
+});

@@ -5,6 +5,7 @@ import { isIP } from 'node:net';
 import os from 'node:os';
 import { sceneSchema } from '../shared/model.js';
 import { Vault, VaultError } from './vault.js';
+import { changeStream } from './changes.js';
 
 export function createApp(vault: Vault, clientDirectory?: string) {
   const app = express();
@@ -44,6 +45,8 @@ export function createApp(vault: Vault, clientDirectory?: string) {
   app.get('/api/health', (_req, res) =>
     res.json({ ok: true, application: 'excalidraws', pid: process.pid }),
   );
+  const events = changeStream(vault.root);
+  app.get('/api/events', events);
   app.get('/api/entries', async (_req, res) => res.json(await vault.list()));
   app.get('/api/document', async (req, res) => res.json(await vault.read(getPath(req.query.path))));
   app.get('/api/revision', async (req, res) =>
@@ -59,7 +62,8 @@ export function createApp(vault: Vault, clientDirectory?: string) {
     const body = z
       .object({ path: z.string(), revision: z.string(), scene: sceneSchema })
       .parse(req.body);
-    res.json(await vault.save(body.path, body.revision, body.scene));
+    const saved = await vault.save(body.path, body.revision, body.scene);
+    res.json({ revision: saved.revision });
   });
   app.post('/api/move', async (req, res) => {
     const body = z.object({ from: z.string(), to: z.string() }).parse(req.body);
@@ -116,5 +120,5 @@ export function createApp(vault: Vault, clientDirectory?: string) {
       });
     },
   );
-  return app;
+  return Object.assign(app, { closeStreams: events.close });
 }
