@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f2f4f1" />
+    <meta name="theme-color" content="#f7f7f5" />
+    <script>
+      // Set the palette before the first paint, including when storage is disabled.
+      let themePreference;
+      try {
+        themePreference = localStorage.getItem('excalidraws:theme');
+      } catch {}
+      document.documentElement.dataset.theme =
+        themePreference === 'light' || themePreference === 'dark'
+          ? themePreference
+          : matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light';
+    </script>
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

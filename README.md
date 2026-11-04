@@ -15,6 +15,9 @@ not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
 ## Usage
 
+- Settings at the bottom left of the sidebar offers System, Light, and Dark themes.
+  System is the default and follows appearance changes immediately. A manual choice
+  applies to the workspace and editor and is remembered in this browser.
 - The Library keeps every canvas in its folder, including the one you are drawing on.
   Search by name or path; archived matches carry an Archive badge. Favorites provides
   quick access without moving files. Recent changes, Name, and Custom order are available.
