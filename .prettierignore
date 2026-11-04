@@ -1,0 +1,7 @@
+node_modules
+dist
+data
+public/excalidraw
+test-results
+playwright-report
+package-lock.json
