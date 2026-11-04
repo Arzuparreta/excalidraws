@@ -2,7 +2,8 @@ import { watch, type FSWatcher } from 'node:fs';
 import type { Request, Response } from 'express';
 
 // One native watcher is shared by all visible clients. Hidden tabs disconnect.
-// Private history and temporary writes never produce client work.
+// Private history and temporary writes never produce client work. Changes to private
+// workspace metadata are announced explicitly with notify().
 export function changeStream(root: string) {
   const clients = new Set<Response>();
   let watcher: FSWatcher | undefined;
@@ -13,6 +14,10 @@ export function changeStream(root: string) {
     for (const client of clients) {
       if (!client.write('event: change\ndata: {}\n\n')) client.end();
     }
+  };
+  const schedule = () => {
+    clearTimeout(pending);
+    pending = setTimeout(broadcast, 160);
   };
   const connect = (_req: Request, res: Response) => {
     res.status(200).set({
@@ -28,8 +33,7 @@ export function changeStream(root: string) {
       try {
         watcher = watch(root, { recursive: true, persistent: false }, (_event, filename) => {
           if (filename?.split(/[\\/]/).some((part) => part.startsWith('.'))) return;
-          clearTimeout(pending);
-          pending = setTimeout(broadcast, 160);
+          schedule();
         });
         watcher.on('error', () => {
           // Reconnection performs a full revision check and recreates the watcher.
@@ -56,6 +60,9 @@ export function changeStream(root: string) {
     });
   };
   return Object.assign(connect, {
+    notify: () => {
+      if (clients.size) schedule();
+    },
     close: () => {
       for (const client of [...clients]) client.end();
     },

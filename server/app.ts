@@ -78,6 +78,27 @@ export function createApp(vault: Vault, clientDirectory?: string) {
     const body = z.object({ id: z.string(), path: z.string().optional() }).parse(req.body);
     res.json({ path: await vault.restore(body.id, body.path) });
   });
+  // Workspace metadata lives in a private file the watcher ignores, so notify clients directly.
+  app.post('/api/library', async (req, res) => {
+    const body = z
+      .object({
+        property: z.enum(['favorite', 'archived']),
+        paths: z.array(z.string()).min(1).max(10_000),
+        value: z.boolean(),
+      })
+      .parse(req.body);
+    await vault.setLibrary(body.paths, body.property, body.value);
+    events.notify();
+    res.json({ ok: true });
+  });
+  app.post('/api/order', async (req, res) => {
+    const body = z
+      .object({ folder: z.string(), paths: z.array(z.string()).max(10_000) })
+      .parse(req.body);
+    await vault.order(body.folder, body.paths);
+    events.notify();
+    res.json({ ok: true });
+  });
   app.get('/api/history', async (req, res) =>
     res.json(await vault.history(getPath(req.query.path))),
   );

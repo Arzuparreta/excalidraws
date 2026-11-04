@@ -57,3 +57,55 @@ test('the shared event stream reports external edits, ignores private metadata a
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('metadata changes are broadcast to connected clients', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'excalidraws-events-'));
+  const vault = new Vault(root);
+  await vault.init();
+  await vault.create('Plan.excalidraw', 'file');
+  const app = createApp(vault);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const controller = new AbortController();
+  const response = await fetch(`${url}/api/events`, { signal: controller.signal });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let received = '';
+  let notify!: () => void;
+  const changed = new Promise<void>((resolve) => {
+    notify = resolve;
+  });
+  const reading = (async () => {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      received += decoder.decode(value);
+      if (received.includes('event: change')) notify();
+    }
+  })();
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const before = await fs.stat(path.join(root, 'Plan.excalidraw'));
+    const result = await fetch(`${url}/api/library`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ property: 'favorite', paths: ['Plan.excalidraw'], value: true }),
+    });
+    assert.equal(result.status, 200);
+    await Promise.race([
+      changed,
+      new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(new Error('No metadata-change notification')), 3000);
+      }),
+    ]);
+    assert.equal((await fs.stat(path.join(root, 'Plan.excalidraw'))).mtimeMs, before.mtimeMs);
+  } finally {
+    clearTimeout(deadline);
+    controller.abort();
+    await reading.catch(() => {});
+    app.closeStreams();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

@@ -5,7 +5,7 @@ Each canvas is an independent `.excalidraw` file: edit it in your browser, open 
 in Excalidraw, or include its folder in your backups.
 
 The workspace is built with Solid.js and Vite. The official React editor is an isolated,
-lazy-loaded component; React does not render the sidebar, navigation, or dialogs.
+lazy-loaded component; React does not render the sidebar, navigation, or contextual surfaces.
 
 The integration uses `@excalidraw/excalidraw` and its public API. The editor remains
 a dependency; this repository adds document management and a file service. It does
@@ -13,37 +13,48 @@ not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
 ## Usage
 
-- Create canvases and folders with one click in the sidebar. They are saved immediately as
-  `Untitled canvas` or `Untitled folder`, followed by `(1)`, `(2)`, etc. when needed. Names
-  are unique within the destination folder, including when another client creates one first.
-- Click the pencil beside a canvas or folder name in the sidebar to rename it in place.
-  The canvas header also has a pencil beside its title. Both locations share a live name
-  draft: typing updates the other view immediately, without renaming the file per keystroke.
-  You can also use the `…` menu or press F2 on a focused explorer row. Edit names in place: Enter or the checkmark saves,
-  Escape cancels, and leaving the field saves. New folders offer inline naming immediately;
-  cancelling keeps the folder with its default name.
-- The “Creating in” line shows where new items will go. Select a folder to create inside it,
-  or use its reset button to return to My canvases. Creating a folder keeps the current
-  destination so repeated clicks create siblings. Search by name or path.
-- The active canvas stays at the top of the sidebar. Sort other canvases by recent changes
-  or name, collapse folders, and use the back/forward buttons to revisit opened canvases.
-- Use Ctrl/Cmd+K to focus search. Hide the sidebar for more drawing space; on small screens,
-  it opens as a drawer with keyboard focus contained inside it.
-- Use the `…` menu to rename, move, or send files and folders to the trash. Moving uses a
-  folder picker inside the sidebar. Renaming or moving an open canvas (or its parent folder)
-  preserves the mounted editor, drawing, viewport, and undo/redo history.
-- Changes are saved automatically after a short pause. Continuous changes schedule a save
-  within four seconds. Switching canvases flushes the current drawing before loading another.
-- Rapid selections cancel obsolete loads and open the last requested canvas. Failed loads
-  leave the current drawing intact. Only one editor is mounted; inactive canvases do not
-  keep live renderers or image caches. Switching resets the editor's undo/redo history.
-- Drawings include embedded images and retain their scroll position and zoom.
-- Import one or more `.excalidraw` files without replacing existing files. Download a canvas
-  from its header.
-- Restore deleted files from the trash. Version history retains the last 20 previous versions
-  **per path**. Restoring a version creates a new canvas.
-- External changes reload automatically when the editor is clean. If you have local changes,
-  a conflict lets you save a copy, download your drawing, or load the server version.
+- The Library keeps every canvas in its folder, including the one you are drawing on.
+  Search by name or path; archived matches carry an Archive badge. Favorites provides
+  quick access without moving files. Recent changes, Name, and Custom order are available.
+- New canvas and New folder create at the top level. Use a folder's own creation action
+  to create inside it. Default names are unique, including when another client creates
+  an item first. New folders offer inline naming immediately; Escape keeps the default.
+- Click the canvas title to rename it. On desktop, a pencil appears beside a row's name
+  on hover or keyboard focus. Touch users can choose Rename from the visible `…` menu.
+  Enter or the checkmark saves, Escape cancels, and leaving the field saves. A single
+  draft keeps the header and row name synchronized without changing the file per keystroke.
+- The `…` menu and right-click provide contextual actions. Move uses a searchable folder
+  picker with a top-level destination and a move-out shortcut. Desktop dragging moves
+  into folders; Custom order also supports insertion between rows. Move up/down and
+  keyboard controls provide alternatives to dragging.
+- Select several items to move, archive, or trash them together. Selecting a folder already
+  includes its contents. Duplicate makes a separate canvas, including for inactive files.
+- Archive hides completed work without changing its file path. Open Archive in the explorer
+  to bring it back. An archived canvas can remain open and editable. Favorites, archive,
+  and custom order are shared between devices through private workspace metadata.
+- Sending an item to Trash is immediate and offers Undo. Trash stays inside the explorer;
+  restore recreates missing parent folders and chooses a free name if the original is
+  occupied. No existing file is replaced. Moves, archive changes, and custom order also
+  offer Undo. Dismissing Undo does not remove items from Trash.
+- The explorer supports keyboard navigation, F2 to rename, and contextual-menu keys.
+  Organization shortcuts are scoped to the explorer so they do not replace drawing tools.
+  Ctrl/Cmd+K focuses search outside the editor; Ctrl/Cmd+Shift+K is the global alternative.
+- Hide the sidebar for more drawing space. Below 1024 px, or in a viewport shorter than
+  500 px, it becomes an overlay drawer. Its focus stays contained while open. Touch
+  controls have larger targets, and rare document actions move into the topbar menu.
+- Each canvas has a `?canvas=` URL. Browser Back/Forward navigates canvases; renaming or
+  moving updates the current location. Opening another canvas flushes the current drawing
+  first. Failed loads preserve it; rapid selections cancel obsolete loads.
+- Changes save automatically after a short pause, with a save scheduled within four seconds
+  of continuous edits. Only one editor is mounted. Renaming, moving, favoriting, archiving,
+  and ordering preserve the active editor, viewport, and drawing undo/redo history.
+- Drawings include embedded images and retain scroll position and zoom. Import one or more
+  `.excalidraw` files without replacing existing files, or download a canvas.
+- Version history retains the last 20 previous versions and follows file and folder moves.
+  Restoring a version creates a separate canvas with a readable name.
+- External changes reload automatically when the editor is clean. With local edits, a
+  conflict offers Save a copy, Download, or Load from server. Discarding the local version
+  requires a second step inside the warning. Saving a copy preserves the remote version.
 
 This is a personal workspace with conflict detection. It does not merge simultaneous edits.
 When two clients save against the same revision, the second receives a conflict. External
@@ -138,8 +149,10 @@ for a consistent backup. When restoring with the service stopped, remove
 Do not share the vault between multiple servers or let untrusted users edit its contents.
 The lock prevents two local service instances; it does not coordinate multiple hosts over NFS.
 
-Moving or renaming a document starts a new history for its path. Previous versions remain
-in `.workspace/history` under the old path's hash.
+Moving or renaming files and folders carries their saved history and workspace metadata
+to the new path. Trash records retain both, and restore reattaches them at the final path.
+Private `.workspace/library.json` stores favorites, archive flags, and sibling order; it
+does not change document bytes or modification times.
 
 Local draft writes are grouped over 250 ms; editor snapshots are also coalesced. Switching,
 exporting, and hiding the page flush pending editor snapshots. Draft availability depends
@@ -175,4 +188,5 @@ and inspect drawing, text, arrows, images, viewport state, and imports.
 `src/editor/ExcalidrawAdapter.tsx` is the integration boundary with Excalidraw 0.18.1.
 
 Architecture and decisions: [docs/PLAN.md](docs/PLAN.md).
+Design council and interaction decisions: [docs/UX-DESIGN.md](docs/UX-DESIGN.md).
 Verification evidence: [docs/VALIDATION.md](docs/VALIDATION.md).

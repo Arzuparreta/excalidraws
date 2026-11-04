@@ -8,7 +8,7 @@ devices. The repository started empty; the editor remains an upstream dependency
 
 ## Architecture
 
-- Solid.js renders the workspace, navigation, virtualized sidebar, and dialogs. Vite builds
+- Solid.js renders the workspace, navigation, virtualized sidebar, and anchored popovers. Vite builds
   the application. Dependencies use exact versions and a lockfile.
 - `@excalidraw/excalidraw` remains the official React component. Only
   `src/editor/ExcalidrawAdapter.tsx` knows its public API and React lifecycle. A lazy import
@@ -36,8 +36,13 @@ devices. The repository started empty; the editor remains an upstream dependency
 - Cancel obsolete document reads and commit only the latest requested canvas. Keep navigation
   history as paths rather than retaining inactive scenes. Undo history belongs to the one
   active editor and resets when it is destroyed.
-- Use a compact sidebar with an active document card and a virtualized file list. On mobile,
-  make the drawer modal to keyboard/pointer interaction without keeping hidden controls active.
+- Keep the active canvas in its folder in a virtualized keyboard-navigable explorer.
+  Favorites, Archive, and Trash use the same explorer area. On narrow or short viewports,
+  contain keyboard/pointer interaction in an overlay drawer without resizing the canvas.
+- Store shared organization in `.workspace/library.json`, separately from scene data.
+  File and folder moves carry metadata and history; trash/restore retain both.
+- Anchor management surfaces to their controls. Reversible actions offer Undo; discarding
+  local edits requires inline confirmation. See [UX-DESIGN.md](UX-DESIGN.md).
 - Reload external changes when the editor is clean. When local edits exist, retain the draft
   and offer to load the server version or save a copy.
 - Compare the draft's original revision when recovering after a page reload.
