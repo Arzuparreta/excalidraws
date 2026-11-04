@@ -117,7 +117,7 @@ function InlineName(props: {
   onSave(restoreFocus: boolean): Promise<boolean>;
   onCancel(): void;
 }) {
-  let form!: HTMLFormElement;
+  let container!: HTMLSpanElement;
   let input!: HTMLInputElement;
   let blurTimer: ReturnType<typeof setTimeout> | undefined;
   const save = async (restoreFocus: boolean) => {
@@ -130,13 +130,9 @@ function InlineName(props: {
   });
   onCleanup(() => clearTimeout(blurTimer));
   return (
-    <form
+    <span
       class="inline-name"
-      ref={form}
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save(true);
-      }}
+      ref={container}
       onFocusOut={(event) => {
         const next = event.relatedTarget;
         if (
@@ -148,12 +144,17 @@ function InlineName(props: {
           return;
         // Let a clicked workspace action finish the edit before its own operation.
         blurTimer = setTimeout(() => {
-          if (form.isConnected && !form.contains(document.activeElement) && !props.busy)
+          if (container.isConnected && !container.contains(document.activeElement) && !props.busy)
             void save(false);
         }, 0);
       }}
       onKeyDown={(e) => {
         e.stopPropagation();
+        if (e.isComposing) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void save(true);
+        }
         if (e.key === 'Escape') {
           e.preventDefault();
           props.onCancel();
@@ -167,12 +168,15 @@ function InlineName(props: {
         aria-describedby={props.value.error ? 'rename-error' : undefined}
         title="Enter to save · Escape to cancel"
         maxLength={160}
+        size={Math.max(1, props.value.name.length)}
         value={props.value.name}
         readOnly={props.busy}
         onInput={(e) => props.onInput(e.currentTarget.value)}
       />
       <button
         class="icon-button"
+        type="button"
+        onClick={() => void save(true)}
         aria-label="Save name"
         title="Save name · Enter"
         disabled={props.busy}
@@ -194,7 +198,7 @@ function InlineName(props: {
           {props.value.error}
         </span>
       </Show>
-    </form>
+    </span>
   );
 }
 
@@ -283,12 +287,39 @@ function FileList(props: {
                 'is-renaming': renamePath() === row.entry.path,
               }}
               data-entry-path={row.entry.path}
+              onClick={(event) => {
+                if (
+                  event.target instanceof Element &&
+                  !event.target.closest('button, .inline-name')
+                )
+                  props.onOpen(row);
+              }}
               style={{ 'padding-left': `${8 + Math.min(row.depth, 7) * 14}px` }}
             >
-              <Show
-                when={renamePath() === row.entry.path}
-                fallback={
-                  <>
+              <button
+                class="file-icon"
+                aria-label={
+                  row.entry.kind === 'folder'
+                    ? `Toggle folder ${basename(row.entry.path)}`
+                    : `Open canvas ${title(row.entry.path)}`
+                }
+                aria-expanded={row.entry.kind === 'folder' ? row.expanded : undefined}
+                tabIndex={-1}
+                onClick={() => props.onOpen(row)}
+              >
+                <Show when={row.entry.kind === 'folder'} fallback={<FileText size={16} />}>
+                  <Show when={row.expanded} fallback={<ChevronRight size={14} />}>
+                    <ChevronDown size={14} />
+                  </Show>
+                  <Show when={row.expanded} fallback={<Folder size={16} />}>
+                    <FolderOpen size={16} />
+                  </Show>
+                </Show>
+              </button>
+              <div class="file-name-slot">
+                <Show
+                  when={renamePath() === row.entry.path}
+                  fallback={
                     <button
                       class="file-select"
                       title={row.entry.path}
@@ -306,54 +337,45 @@ function FileList(props: {
                         }
                       }}
                     >
-                      <Show when={row.entry.kind === 'folder'} fallback={<FileText size={16} />}>
-                        <Show when={row.expanded} fallback={<ChevronRight size={14} />}>
-                          <ChevronDown size={14} />
-                        </Show>
-                        <Show when={row.expanded} fallback={<Folder size={16} />}>
-                          <FolderOpen size={16} />
-                        </Show>
-                      </Show>
                       <span class="file-name">
                         {row.entry.kind === 'folder'
                           ? basename(row.entry.path)
                           : title(row.entry.path)}
                       </span>
-                      <Show when={props.search && parent(row.entry.path)}>
-                        <span class="file-parent">{parent(row.entry.path)}</span>
-                      </Show>
-                      <Show when={row.entry.kind === 'file' && !props.search}>
-                        <time class="file-date" dateTime={row.entry.modified}>
-                          {shortDate(row.entry.modified)}
-                        </time>
-                      </Show>
                     </button>
-                    <button
-                      class="icon-button row-rename"
-                      data-name-transition
-                      aria-label={`Rename ${row.entry.kind === 'folder' ? basename(row.entry.path) : title(row.entry.path)}`}
-                      title="Rename"
-                      onClick={() => props.onRename(row.entry.path)}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      class="icon-button row-menu"
-                      data-menu-trigger
-                      aria-label={`Actions for ${row.entry.kind === 'folder' ? basename(row.entry.path) : title(row.entry.path)}`}
-                      aria-expanded={props.menuPath === row.entry.path}
-                      onClick={(e) => props.onMenu(row.entry, e.currentTarget)}
-                    >
-                      <Ellipsis size={17} />
-                    </button>
-                  </>
-                }
-              >
-                <Show when={row.entry.kind === 'folder'} fallback={<FileText size={16} />}>
-                  <Folder size={16} />
+                  }
+                >
+                  {props.renderRename()}
                 </Show>
-                {props.renderRename()}
+              </div>
+              <Show when={props.search && parent(row.entry.path)}>
+                <span class="file-parent">{parent(row.entry.path)}</span>
               </Show>
+              <Show when={row.entry.kind === 'file' && !props.search}>
+                <time class="file-date" dateTime={row.entry.modified}>
+                  {shortDate(row.entry.modified)}
+                </time>
+              </Show>
+              <Show when={renamePath() !== row.entry.path}>
+                <button
+                  class="icon-button row-rename"
+                  data-name-transition
+                  aria-label={`Rename ${row.entry.kind === 'folder' ? basename(row.entry.path) : title(row.entry.path)}`}
+                  title="Rename"
+                  onClick={() => props.onRename(row.entry.path)}
+                >
+                  <Pencil size={14} />
+                </button>
+              </Show>
+              <button
+                class="icon-button row-menu"
+                data-menu-trigger
+                aria-label={`Actions for ${row.entry.kind === 'folder' ? basename(row.entry.path) : title(row.entry.path)}`}
+                aria-expanded={props.menuPath === row.entry.path}
+                onClick={(e) => props.onMenu(row.entry, e.currentTarget)}
+              >
+                <Ellipsis size={17} />
+              </button>
             </div>
           )}
         </For>
@@ -534,7 +556,6 @@ export function Workspace() {
       setRenameLocation(location);
       if (target === activePath() && location === 'topbar') closeSidebar();
       else {
-        setSearch('');
         setListCollapsed(false);
         setCollapsed(
           (previous) => new Set([...previous].filter((p) => !target.startsWith(`${p}/`))),
@@ -795,61 +816,71 @@ export function Workspace() {
         </div>
         <Show when={w.session()}>
           {(session) => (
-            <div class="active-card">
-              <Show
-                when={editingActiveIn('sidebar')}
-                fallback={
-                  <button
-                    class="active-select"
-                    aria-label={activeName()}
-                    aria-current="page"
-                    title={activePath()}
-                    onClick={() => openBoard(activePath())}
-                    onKeyDown={(e) => {
-                      if (e.key === 'F2') {
-                        e.preventDefault();
-                        startRename(activePath());
-                      }
-                    }}
-                  >
-                    <span class="active-context">
-                      <FileText size={15} />
-                      <span>{parent(activePath()) || 'My canvases'}</span>
-                      <Show when={activeEntry()}>
-                        {(entry) => (
-                          <time dateTime={entry().modified}>{shortDate(entry().modified)}</time>
-                        )}
-                      </Show>
-                    </span>
-                    <span class="active-title">{activeName()}</span>
-                    <span class="active-state">
-                      <span
-                        class="state-dot"
-                        classList={{
-                          dirty: w.state().dirty,
-                          problem:
-                            w.state().status === 'offline' || w.state().status === 'conflict',
-                        }}
-                      />
-                      {statusLabels[w.state().status]}
-                    </span>
-                  </button>
-                }
-              >
-                <div class="active-name-editor">{renderRename()}</div>
-              </Show>
-              <Show when={!editingActiveIn('sidebar')}>
-                <button
-                  class="icon-button active-rename"
-                  data-name-transition
-                  aria-label={`Rename ${activeName()} in sidebar`}
-                  title="Rename"
-                  disabled={w.busy()}
-                  onClick={() => startRename(activePath())}
+            <div
+              class="active-card"
+              onClick={(event) => {
+                if (
+                  event.target instanceof Element &&
+                  !event.target.closest('button, .inline-name')
+                )
+                  openBoard(activePath());
+              }}
+            >
+              <span class="active-context">
+                <FileText size={15} />
+                <span>{parent(activePath()) || 'My canvases'}</span>
+                <Show when={activeEntry()}>
+                  {(entry) => (
+                    <time dateTime={entry().modified}>{shortDate(entry().modified)}</time>
+                  )}
+                </Show>
+              </span>
+              <div class="active-name-line">
+                <Show
+                  when={editingActiveIn('sidebar')}
+                  fallback={
+                    <button
+                      class="active-select active-title"
+                      aria-label={activeName()}
+                      aria-current="page"
+                      title={activePath()}
+                      onClick={() => openBoard(activePath())}
+                      onKeyDown={(e) => {
+                        if (e.key === 'F2') {
+                          e.preventDefault();
+                          startRename(activePath());
+                        }
+                      }}
+                    >
+                      {activeName()}
+                    </button>
+                  }
                 >
-                  <Pencil size={14} />
-                </button>
-              </Show>
+                  {renderRename()}
+                </Show>
+                <Show when={!editingActiveIn('sidebar')}>
+                  <button
+                    class="icon-button active-rename"
+                    data-name-transition
+                    aria-label={`Rename ${activeName()} in sidebar`}
+                    title="Rename"
+                    disabled={w.busy()}
+                    onClick={() => startRename(activePath())}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </Show>
+              </div>
+              <span class="active-state">
+                <span
+                  class="state-dot"
+                  classList={{
+                    dirty: w.state().dirty,
+                    problem: w.state().status === 'offline' || w.state().status === 'conflict',
+                  }}
+                />
+                {statusLabels[w.state().status]}
+              </span>
               <button
                 class="icon-button active-menu"
                 data-menu-trigger
@@ -1122,11 +1153,11 @@ export function Workspace() {
                     </button>
                     <ChevronRight class="breadcrumb-chevron" size={13} />
                   </Show>
-                  <Show
-                    when={editingActiveIn('topbar')}
-                    fallback={
-                      <div class="canvas-name">
-                        <h1 title={activeName()} aria-label={activeName()}>
+                  <div class="canvas-name">
+                    <h1 title={activeName()} aria-label={activeName()}>
+                      <Show
+                        when={editingActiveIn('topbar')}
+                        fallback={
                           <button
                             ref={titleButton}
                             class="title-button"
@@ -1137,22 +1168,24 @@ export function Workspace() {
                           >
                             {activeName()}
                           </button>
-                        </h1>
-                        <button
-                          class="icon-button"
-                          aria-label="Rename canvas"
-                          data-name-transition
-                          title="Rename canvas"
-                          onClick={() => startRename(activePath(), 'topbar')}
-                          disabled={w.busy()}
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </div>
-                    }
-                  >
-                    {renderRename()}
-                  </Show>
+                        }
+                      >
+                        {renderRename()}
+                      </Show>
+                    </h1>
+                    <Show when={!editingActiveIn('topbar')}>
+                      <button
+                        class="icon-button"
+                        aria-label="Rename canvas"
+                        data-name-transition
+                        title="Rename canvas"
+                        onClick={() => startRename(activePath(), 'topbar')}
+                        disabled={w.busy()}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </Show>
+                  </div>
                 </>
               )}
             </Show>

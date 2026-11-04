@@ -139,3 +139,10 @@ between them, cancellation, a single committed move, inactive canvas and folder 
 editor identity, and the mobile sidebar. Screenshots cover the desktop and mobile controls.
 The list's rename scrolling depends only on the target path and error visibility, so typing
 does not rescan the list to reposition it.
+
+Name editing is confined to the existing text slot. The active card retains its context,
+modified date, save state, menu and dimensions; explorer rows retain their icons, indentation
+and dates. The header retains its heading and tools, including on mobile. The name field
+inherits the displayed text's typography and background, with an underline for keyboard
+focus. Browser checks retain handles to the context, state, heading, tools, row icon and date
+and assert that they stay mounted while editing; card and row bounds stay unchanged.

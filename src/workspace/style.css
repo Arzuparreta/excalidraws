@@ -171,22 +171,34 @@ body,
 }
 .active-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 12px 11px;
   background: var(--selected);
   border-radius: 6px;
   margin: 0 0 10px;
   flex-shrink: 0;
 }
 .workspace button.active-select {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
+  display: block;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  line-height: 20px;
   text-align: left;
-  width: 100%;
-  gap: 7px;
   border: 0;
   background: transparent;
-  padding: 12px 12px 11px;
+  padding: 0;
+}
+.active-name-line {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  height: 20px;
+  font-size: 14px;
+  font-weight: 600;
 }
 .workspace button.active-select:hover {
   background: #d3e2d8;
@@ -300,6 +312,9 @@ body,
 }
 .file-row {
   display: flex;
+  gap: 9px;
+  font-size: 13px;
+  color: #646c63;
   align-items: center;
   height: 40px;
   border-radius: 5px;
@@ -310,6 +325,7 @@ body,
   background: var(--hover);
 }
 .workspace button.file-select {
+  width: 100%;
   justify-content: flex-start;
   min-width: 0;
   flex: 1;
@@ -322,11 +338,18 @@ body,
   font-size: 13px;
   color: #646c63;
 }
-.file-select svg {
-  flex: 0 0 auto;
+.workspace button.file-icon {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
-.file-select svg + svg {
-  margin-left: -5px;
+.file-name-slot {
+  min-width: 0;
+  flex: 1;
 }
 .file-name {
   text-overflow: ellipsis;
@@ -784,32 +807,31 @@ body,
   gap: 1px;
   flex: 1;
   min-width: 0;
-  max-width: 440px;
-  padding: 1px;
-  background: #fff;
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  box-shadow: 0 0 0 2px #345d4610;
+  height: 20px;
+  font: inherit;
 }
 .inline-name input {
   width: 100%;
   min-width: 0;
-  height: 28px;
-  padding: 3px 6px;
+  height: 20px;
+  padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 0;
+  color: inherit;
   background: transparent;
-  font-size: 13px;
+  font: inherit;
+  line-height: 20px;
 }
 .workspace .inline-name input:focus-visible {
   outline: none;
+  box-shadow: inset 0 -1px var(--accent);
 }
 .workspace .inline-name .icon-button {
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
 }
-.inline-name:has([aria-invalid='true']) {
-  border-color: #a13c35;
+.inline-name input[aria-invalid='true'] {
+  box-shadow: inset 0 -1px #a13c35;
 }
 .rename-error {
   position: absolute;
@@ -829,13 +851,7 @@ body,
 }
 .file-row.is-renaming {
   position: relative;
-  gap: 6px;
-  padding-left: 4px !important;
   z-index: 2;
-}
-.file-row.is-renaming > svg {
-  flex-shrink: 0;
-  color: var(--muted);
 }
 .file-row .rename-error {
   width: 100%;
@@ -853,14 +869,8 @@ body,
   margin-bottom: 2px;
 }
 @media (max-width: 760px) {
-  .document-title:has(.inline-name) + .document-tools {
-    display: none;
-  }
   .workspace button.breadcrumb-parent {
     display: none;
-  }
-  .inline-name input {
-    font-size: 16px;
   }
 }
 .organize-panel {
@@ -915,17 +925,8 @@ body,
   flex-shrink: 0;
 }
 .workspace button.active-rename {
-  position: absolute;
-  top: 35px;
-  right: 7px;
-  width: 26px;
-  height: 28px;
-}
-.active-title {
-  padding-right: 25px;
-}
-.active-name-editor {
-  padding: 12px 8px 36px;
+  width: 20px;
+  height: 20px;
 }
 .canvas-name {
   display: flex;
@@ -939,4 +940,8 @@ body,
 }
 .canvas-name h1 {
   flex: 0 1 auto;
+}
+
+.canvas-name h1:has(.inline-name) {
+  overflow: visible;
 }

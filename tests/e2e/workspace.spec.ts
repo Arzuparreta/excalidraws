@@ -490,6 +490,11 @@ test('sidebar pencils share a live name draft with the topbar without moving fil
 }) => {
   await page.goto('/');
   await create(page, 'Shared name');
+  const cardBox = await page.locator('.active-card').boundingBox();
+  const context = await page.locator('.active-context').elementHandle();
+  const status = await page.locator('.active-state').elementHandle();
+  const heading = await page.locator('.document-title h1').elementHandle();
+  const tools = await page.locator('.document-tools').elementHandle();
   const canvas = await page.locator('.excalidraw canvas.interactive').elementHandle();
   const moves: string[] = [];
   page.on('request', (request) => {
@@ -508,6 +513,11 @@ test('sidebar pencils share a live name draft with the topbar without moving fil
   await page.getByRole('button', { name: 'Rename Live draft in sidebar', exact: true }).click();
   await expect(page.locator('.active-card input')).toBeFocused();
   await expect(input).toHaveValue('Live draft');
+  expect(await page.locator('.active-card').boundingBox()).toEqual(cardBox);
+  for (const element of [context, status, heading, tools])
+    expect(await element!.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(page.locator('.active-context')).toBeVisible();
+  await expect(page.locator('.active-state')).toBeVisible();
   await input.fill('Sidebar draft');
   await expect(page.getByRole('heading', { name: 'Sidebar draft', exact: true })).toBeVisible();
   expect(moves).toHaveLength(0);
@@ -515,6 +525,9 @@ test('sidebar pencils share a live name draft with the topbar without moving fil
   await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
   await expect(page.locator('.document-title input')).toBeFocused();
   await expect(input).toHaveValue('Sidebar draft');
+  expect(await heading!.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(page.locator('.document-tools')).toBeVisible();
+  await page.screenshot({ path: 'test-results/shared-name-topbar.png' });
   expect(moves).toHaveLength(0);
   await input.press('Escape');
   await expect(page.locator('.active-title')).toHaveText('Shared name');
@@ -530,11 +543,28 @@ test('sidebar pencils share a live name draft with the topbar without moving fil
     'Committed name.excalidraw',
   );
   await create(page, 'Another canvas');
+  const row = page.locator('[data-entry-path="Committed name.excalidraw"]');
+  await row.scrollIntoViewIfNeeded();
+  const icon = await row.locator('.file-icon').elementHandle();
+  const date = await row.locator('time').elementHandle();
+  const rowBox = await row.boundingBox();
   await page.getByRole('button', { name: 'Rename Committed name', exact: true }).click();
+  for (const element of [icon, date])
+    expect(await element!.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(row.locator('time')).toBeVisible();
+  expect(await row.boundingBox()).toEqual(rowBox);
+  await page.screenshot({ path: 'test-results/shared-name-row.png' });
   await expect(input).toBeFocused();
   await input.fill('Inactive rename');
   await input.press('Enter');
   await expect(page.getByRole('button', { name: 'Inactive rename', exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search canvases' }).fill('Inactive');
+  await page.getByRole('button', { name: 'Rename Inactive rename', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Search canvases' })).toHaveValue('Inactive');
+  await input.fill('Search draft');
+  await expect(page.locator('.file-row')).toHaveCount(1);
+  await input.press('Escape');
+  await page.getByRole('textbox', { name: 'Search canvases' }).fill('');
   await expect(page.getByRole('heading', { name: 'Another canvas', exact: true })).toBeVisible();
   expect(
     await page
@@ -545,8 +575,12 @@ test('sidebar pencils share a live name draft with the topbar without moving fil
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Open explorer', exact: true }).click();
   await page.getByRole('button', { name: 'Rename Another canvas in sidebar', exact: true }).click();
+  const mobileCardBox = await page.locator('.active-card').boundingBox();
   await expect(page.locator('.active-card input')).toBeFocused();
+  await expect(page.locator('.active-context')).toBeVisible();
+  await expect(page.locator('.active-state')).toBeVisible();
   await input.fill('Mobile sidebar');
+  expect(await page.locator('.active-card').boundingBox()).toEqual(mobileCardBox);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: 'test-results/shared-name-mobile.png' });
   await input.press('Enter');
