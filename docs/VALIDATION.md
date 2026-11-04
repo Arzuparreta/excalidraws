@@ -1,5 +1,51 @@
 # Delivery verification
 
+## Canvas library redesign
+
+Verified on November 4, 2026, after the initial three-member Opus 5.5 design study
+and the two independent implementation critiques recorded in [UX-DESIGN.md](UX-DESIGN.md).
+
+- `npm run check` passes: client/server TypeScript, 32 logic/session/vault tests,
+  production build, and 21 Chromium E2E flows. Formatting passes and `npm audit`
+  reports zero vulnerabilities.
+- Browser coverage includes a 300-canvas virtualized library, stable current rows,
+  shared inline drafts, keyboard focus, search, bulk operations, custom order,
+  pointer drag, compound move/insertion Undo, favorite/archive synchronization
+  between two clients, and recoverable trash/restore.
+- Existing drawing, text, arrow, image import/export, viewport, immediate switching,
+  conflict, offline draft, external deletion, and single-editor checks remain in
+  the suite. Managing unrelated entries does not make the editor inert. A canvas
+  selection queued behind a deliberately blocked rename is honored.
+- Touch checks use a separate `hasTouch`/mobile browser context. Rows and controls
+  have 44 px targets and inputs use 16 px text. Portrait 390 × 844 and landscape
+  844 × 390 captures were inspected; the landscape list retains at least four rows.
+  Layout coverage also includes 320, 760, 768, 844, 900, 1024, and 1366 px widths.
+- A move picker survives crossing the docked/drawer breakpoint. A clean external
+  update preserves the open drawer. A server notification during inline folder
+  naming preserves its draft and focus. Back skips a trashed historical visit,
+  including when the trash operation is still completing.
+- Private organization persists without changing scene bytes, revisions, or
+  modification times. File and ancestor-folder moves carry history and metadata;
+  restore safely handles reused names, missing parents, and older trash records.
+  Metadata notifications reach another visible client through SSE.
+- No application `<dialog>` remains. Move and history retain accessible dialog
+  semantics on anchored surfaces. Local discard confirmation stays inside the
+  warning. Popovers observe layout changes instead of running a perpetual frame loop.
+- The checked build is installed in `excalidraws.service` at `0.0.0.0:3000`.
+  Its health PID matches systemd, and its served HTML matches the production build
+  byte for byte. A prior backup is at
+  `~/.local/share/excalidraws/backups/canvas-ux-2026-11-04.tar.gz`.
+- All 33 existing vault files and 20 directories retain their names and SHA-256
+  hashes, excluding the service lock. A separate browser context inspected the
+  installed desktop and touch bundles with browser-only fixtures and intercepted
+  every API write. No writes reached the vault and no page errors occurred. The UI
+  remains English with an `es-ES` browser locale.
+
+Physical Safari, iOS keyboard behavior, and touch hardware were not tested. The
+mobile evidence is Chromium emulation on the desktop.
+
+## Earlier deliveries
+
 Verified on `desktop` on November 4, 2026.
 
 - Client and server TypeScript checks pass.

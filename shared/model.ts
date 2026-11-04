@@ -16,7 +16,16 @@ export interface Entry {
   path: string;
   kind: 'file' | 'folder';
   modified: string;
+  /** Explicitly marked as a favorite. Not inherited. */
+  favorite?: boolean;
+  /** Archived itself or inside an archived folder. */
+  archived?: boolean;
+  /** The nearest explicitly archived path: the entry itself or an ancestor folder. */
+  archiveRoot?: string;
+  /** Index among siblings: custom order first, then the remaining items by name. */
+  order?: number;
 }
+export type LibraryProperty = 'favorite' | 'archived';
 export interface Document {
   path: string;
   revision: string;

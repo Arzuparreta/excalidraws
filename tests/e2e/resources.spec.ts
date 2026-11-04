@@ -9,7 +9,7 @@ async function seed(request: APIRequestContext, name: string) {
 async function ready(page: Page) {
   await expect(page.locator('.excalidraw canvas.interactive')).toBeVisible();
   await expect(page.getByLabel('Processing', { exact: true })).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
 }
 
 test('the empty Solid workspace loads without downloading the editor runtime', async ({ page }) => {
@@ -17,6 +17,7 @@ test('the empty Solid workspace loads without downloading the editor runtime', a
   page.on('request', (request) => {
     if (/ExcalidrawAdapter.*\.(js|css)/.test(request.url())) editorRequests.push(request.url());
   });
+  await page.route('**/api/entries', (route) => route.fulfill({ json: [] }));
   await page.goto('/');
   await expect(page.getByText('Open a canvas or create one.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create canvas', exact: true })).toBeEnabled();
@@ -144,7 +145,7 @@ test('large libraries render a bounded list, retain selection through search and
   await page.keyboard.press('Escape');
   await expect(sortButton).toBeFocused();
   expect(await page.locator('.file-row').count()).toBeLessThan(60);
-  await page.getByRole('navigation', { name: 'Files' }).evaluate((list) => {
+  await page.locator('.file-list').evaluate((list) => {
     list.scrollTop = list.scrollHeight;
   });
   await expect(page.getByRole('button', { name: 'ZZZ Library 299', exact: true })).toBeVisible();
@@ -152,21 +153,22 @@ test('large libraries render a bounded list, retain selection through search and
   await expect(page.getByRole('heading', { name: 'ZZZ Library 299', exact: true })).toBeVisible();
   await ready(page);
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('missing search');
-  await expect(page.getByRole('button', { name: 'ZZZ Library 299', exact: true })).toHaveAttribute(
-    'aria-current',
-    'page',
-  );
+  await expect(page.getByRole('heading', { name: 'ZZZ Library 299', exact: true })).toBeVisible();
   await expect(page.getByText('No matching canvases.')).toBeVisible();
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('');
-  for (const width of [320, 390, 760, 761, 1024, 1366]) {
+  await page.locator('.title-button').focus();
+  for (const width of [320, 390, 760, 844, 900, 1024, 1366]) {
     await page.setViewportSize({ width, height: 800 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
+    await expect
+      .poll(async () => (await page.locator('.editor-surface').boundingBox())!.width)
+      .toBeGreaterThan(250);
     const editor = (await page.locator('.editor-surface').boundingBox())!;
     expect(editor.width).toBeGreaterThan(250);
     expect(editor.x + editor.width).toBeLessThanOrEqual(width);
-    if (width <= 760) {
+    if (width < 1024) {
       await expect(page.getByRole('complementary', { name: 'Canvas explorer' })).toBeHidden();
       await page.getByRole('button', { name: 'Open explorer', exact: true }).click();
       await expect(page.getByRole('complementary', { name: 'Canvas explorer' })).toBeVisible();
@@ -179,6 +181,11 @@ test('large libraries render a bounded list, retain selection through search and
         await expect(page.getByRole('menu', { name: 'Sort canvases', exact: true })).toHaveCount(0);
         await expect(page.getByRole('complementary', { name: 'Canvas explorer' })).toBeVisible();
         await page.getByRole('button', { name: 'New folder', exact: true }).click();
+        await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toBeFocused();
+        // A filesystem notification must not silently commit the inline name draft.
+        const count = Number(await page.locator('.list-header .entry-count').textContent());
+        await seed(request, 'ZZZ Watch refresh');
+        await expect(page.locator('.list-header .entry-count')).toHaveText(String(count + 1));
         await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toBeFocused();
         await expect(page.getByRole('dialog')).toHaveCount(0);
         await page.keyboard.press('Escape');

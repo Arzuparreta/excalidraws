@@ -4,15 +4,16 @@ import type { Document } from '../../shared/model';
 const document = async (request: APIRequestContext, path: string): Promise<Document> =>
   (await request.get(`/api/document?path=${encodeURIComponent(path)}`)).json();
 async function create(page: Page, name: string) {
-  const newCanvas = page.getByRole('button', { name: 'New canvas', exact: true });
+  const newCanvas = page.locator('.explorer-actions .new-canvas');
   await expect(newCanvas).toBeEnabled();
   const root = page.getByRole('button', { name: 'Create in root', exact: true });
   if (await root.isVisible()) await root.click();
   await newCanvas.click();
-  await expect(page.getByRole('button', { name: 'Rename canvas', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+  await expect(page.locator('.title-button')).toBeEnabled();
+  await page.locator('.title-button').click();
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill(name);
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Canvas name', exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   await expect(page.locator('.excalidraw canvas').first()).toBeVisible();
@@ -46,7 +47,7 @@ test('draw, immediately switch, reload, rename, move, trash and restore real doc
   await expect(page.getByRole('heading', { name: 'First', exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'First', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+  await page.locator('.title-button').click();
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill('A plan');
   await page.getByRole('button', { name: 'Save name', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'A plan', exact: true })).toBeVisible();
@@ -56,21 +57,19 @@ test('draw, immediately switch, reload, rename, move, trash and restore real doc
   await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Actions for A plan', exact: true }).click();
-  await page.getByRole('button', { name: 'Move to…', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Folder', exact: true }).selectOption('Projects');
+  await page.getByRole('menuitem', { name: 'Move to…', exact: true }).click();
   await page.screenshot({ path: 'test-results/move-in-sidebar-desktop.png' });
-  await page.getByRole('button', { name: 'Move', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Move item', exact: true })).toHaveCount(0);
+  await page.getByRole('option', { name: /^Projects/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Move to folder' })).toHaveCount(0);
   await expect
     .poll(async () => (await document(request, 'Projects/A plan.excalidraw')).scene.elements.length)
     .toBe(1);
   await page.getByRole('button', { name: 'Actions for A plan', exact: true }).click();
-  await page.getByRole('button', { name: 'Move to trash', exact: true }).click();
-  await page.getByRole('button', { name: 'Move to trash', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Move to trash', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Trash', exact: true }).click();
+  await page.getByRole('tab', { name: 'Trash', exact: true }).click();
   await page.getByRole('button', { name: 'Restore A plan', exact: true }).click();
-  await expect(page.getByText('The trash is empty.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Restore A plan', exact: true })).toHaveCount(0);
   expect((await document(request, 'Projects/A plan.excalidraw')).scene.elements).toHaveLength(1);
   expect(errors).toEqual([]);
 });
@@ -81,7 +80,7 @@ test('dirty external edits conflict without overwriting either version; save a c
 }) => {
   await page.goto('/');
   await create(page, 'Conflict');
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -109,8 +108,11 @@ test('dirty external edits conflict without overwriting either version; save a c
   ).toBeVisible();
   expect((await document(request, base.path)).scene.elements).toHaveLength(0);
   await page.getByRole('button', { name: 'Save a copy', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('My copy');
-  await page.getByRole('button', { name: 'Save copy', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Conflict (copy)', exact: true })).toBeVisible();
+  await page.locator('.title-button').click();
+  await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill('My copy');
+  await page.getByRole('textbox', { name: 'Canvas name', exact: true }).press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Canvas name', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'My copy', exact: true })).toBeVisible();
   expect((await document(request, 'My copy.excalidraw')).scene.elements).toHaveLength(1);
   expect((await document(request, base.path)).scene.appState.viewBackgroundColor).toBe('#fce7f3');
@@ -119,25 +121,25 @@ test('dirty external edits conflict without overwriting either version; save a c
 test('offline draft survives reload and is saved after reconnection', async ({ page, request }) => {
   await page.goto('/');
   await create(page, 'Draft');
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
   await page.route('**/api/document', async (route) => {
     if (route.request().method() === 'PUT') return route.abort('failed');
     await route.continue();
   });
   await draw(page);
-  await expect(page.getByRole('status')).toContainText('Not saved');
+  await expect(page.locator('.save-status')).toContainText('Not saved');
   expect((await document(request, 'Draft.excalidraw')).scene.elements).toHaveLength(0);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Draft', exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Not saved');
+  await expect(page.locator('.save-status')).toContainText('Not saved');
   await page.unroute('**/api/document');
   // A queued autosave may recover as soon as the route is restored, removing the
   // retry button before Playwright can click it on a busy machine.
   await Promise.any([
     page.getByRole('button', { name: 'Retry saving', exact: true }).click({ timeout: 2000 }),
-    expect(page.getByRole('status')).toContainText('Saved'),
+    expect(page.locator('.save-status')).toContainText('Saved'),
   ]);
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
   expect((await document(request, 'Draft.excalidraw')).scene.elements).toHaveLength(1);
 });
 
@@ -211,7 +213,7 @@ test('images and viewport survive import, switching and export; clean external c
   const zoomLabel = await page
     .getByRole('button', { name: 'Reset zoom', exact: true })
     .textContent();
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
   await create(page, 'Switch');
   await page.getByRole('button', { name: 'Image', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Image', exact: true })).toBeVisible();
@@ -231,7 +233,7 @@ test('images and viewport survive import, switching and export; clean external c
   for await (const chunk of stream!) buffers.push(chunk);
   const exported = JSON.parse(Buffer.concat(buffers).toString());
   expect(exported.files.pixel).toBeTruthy();
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
   const current = await document(request, before.path);
   await request.put('/api/document', {
     data: {
@@ -305,7 +307,7 @@ test('official text and arrow tools work with all editor assets served locally',
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6, { steps: 8 });
   await page.mouse.up();
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
   const saved = await document(request, 'Text and arrows.excalidraw');
   expect(saved.scene.elements.map((e) => e.type).sort()).toEqual(['arrow', 'text']);
   expect(saved.scene.elements.find((e) => e.type === 'text')?.text).toBe('An idea worth keeping');
@@ -320,20 +322,23 @@ test('external deletion preserves the open scene across reload until saved as a 
   await page.goto('/');
   await create(page, 'Missing');
   await draw(page);
-  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(page.locator('.save-status')).toContainText('Saved');
   await request.post('/api/trash', { data: { path: 'Missing.excalidraw' } });
-  await expect(page.getByRole('status')).toContainText('Conflict');
+  await expect(page.locator('.save-status')).toContainText('Conflict');
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Missing', exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Conflict');
+  await expect(page.locator('.save-status')).toContainText('Conflict');
   await page.getByRole('button', { name: 'Save a copy', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Recovered');
-  await page.getByRole('button', { name: 'Save copy', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Missing (copy)', exact: true })).toBeVisible();
+  await page.locator('.title-button').click();
+  await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill('Recovered');
+  await page.getByRole('textbox', { name: 'Canvas name', exact: true }).press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Canvas name', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Recovered', exact: true })).toBeVisible();
   expect((await document(request, 'Recovered.excalidraw')).scene.elements).toHaveLength(1);
 });
 
-test('creation is immediate, names are scoped to the destination and concurrent collisions are retried', async ({
+test('creation has explicit destinations and concurrent name collisions are retried', async ({
   page,
   request,
 }) => {
@@ -342,44 +347,40 @@ test('creation is immediate, names are scoped to the destination and concurrent 
     data: { path: 'Naming workflow/Untitled canvas.excalidraw', kind: 'file' },
   });
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'New canvas', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Naming workflow', exact: true }).click();
-  await expect(page.locator('.destination')).toContainText('Naming workflow');
+  await expect(page.locator('.explorer-actions .new-canvas')).toBeEnabled();
+  const createHere = async (label: string) => {
+    await page.getByRole('textbox', { name: 'Search canvases' }).fill('Naming workflow');
+    await page.getByRole('button', { name: 'Actions for Naming workflow', exact: true }).click();
+    await page.getByRole('menuitem', { name: label, exact: true }).click();
+  };
   let collided = false;
   await page.route('**/api/entries', async (route) => {
     if (route.request().method() === 'POST' && !collided) {
       collided = true;
-      const body = route.request().postDataJSON();
-      await request.post('/api/entries', { data: body });
+      await request.post('/api/entries', { data: route.request().postDataJSON() });
     }
     await route.continue();
   });
-  await page.getByRole('button', { name: 'New canvas', exact: true }).click();
+  await createHere('New canvas here');
   await expect(
     page.getByRole('heading', { name: 'Untitled canvas (2)', exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect((await document(request, 'Naming workflow/Untitled canvas (2).excalidraw')).path).toBe(
     'Naming workflow/Untitled canvas (2).excalidraw',
   );
-  await page.getByRole('button', { name: 'New canvas', exact: true }).click();
+  await createHere('New canvas here');
   await expect(
     page.getByRole('heading', { name: 'Untitled canvas (3)', exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'New folder', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await createHere('New folder here');
   const folderName = page.getByRole('textbox', { name: 'Folder name', exact: true });
   await expect(folderName).toBeFocused();
   await folderName.press('Escape');
-  await expect(
-    page.locator('[data-entry-path="Naming workflow/Untitled folder"] .file-select'),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await expect(page.locator('[data-entry-path="Naming workflow/Untitled folder"]')).toBeVisible();
+  await createHere('New folder here');
   await expect(folderName).toHaveValue('Untitled folder (1)');
   await folderName.fill('Ideas.excalidraw');
   await folderName.press('Enter');
-  await expect(page.getByRole('button', { name: 'Ideas.excalidraw', exact: true })).toBeVisible();
-  await expect(page.locator('.destination')).toContainText('Naming workflow');
   const tree = await (await request.get('/api/entries')).json();
   expect(tree.some((e: { path: string }) => e.path === 'Naming workflow/Ideas.excalidraw')).toBe(
     true,
@@ -389,6 +390,14 @@ test('creation is immediate, names are scoped to the destination and concurrent 
       (e: { path: string }) => e.path === 'Naming workflow/Untitled folder/Untitled folder',
     ),
   ).toBe(false);
+  // Expanding a folder never changes the global create destination.
+  await page.locator('[data-entry-path="Naming workflow"] .file-select').click();
+  await page.locator('.explorer-actions .new-canvas').click();
+  await expect(page.locator('.processing')).toHaveCount(0);
+  const entries = await (await request.get('/api/entries')).json();
+  const name = await page.locator('.document-title h1').getAttribute('aria-label');
+  expect(entries.some((e: { path: string }) => e.path === `${name}.excalidraw`)).toBe(true);
+  await expect(page.locator('dialog')).toHaveCount(0);
 });
 
 test('inline naming handles errors, cancellation, blur and creation without losing the clicked action', async ({
@@ -400,7 +409,7 @@ test('inline naming handles errors, cancellation, blur and creation without losi
   });
   await page.goto('/');
   await create(page, 'Inline original');
-  await page.getByRole('button', { name: 'Rename Inline original', exact: true }).click();
+  await page.locator('.title-button').click();
   const name = page.getByRole('textbox', { name: 'Canvas name', exact: true });
   await expect(name).toBeFocused();
   await name.fill('');
@@ -414,14 +423,14 @@ test('inline naming handles errors, cancellation, blur and creation without losi
   await expect(page.getByRole('alert')).toContainText('already exists');
   await name.press('Escape');
   await expect(page.getByRole('heading', { name: 'Inline original', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+  await page.locator('.title-button').click();
   await name.fill('');
   await name.pressSequentially('Inline blur');
   await expect(name).toHaveValue('Inline blur');
   await page.getByRole('textbox', { name: 'Search canvases' }).click();
   await expect(page.getByRole('heading', { name: 'Inline blur', exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Search canvases' })).toBeFocused();
-  await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+  await page.locator('.title-button').click();
   await name.fill('Inline before creation');
   await page.getByRole('button', { name: 'New canvas', exact: true }).click({ delay: 120 });
   await expect(page.getByRole('heading', { name: /^Untitled canvas/ })).toBeVisible();
@@ -454,7 +463,6 @@ test('renaming an open parent folder retains the editor, saves to the new path a
   await page.screenshot({ path: 'test-results/inline-folder-desktop.png' });
   await name.press('Enter');
   await expect(page.locator('.breadcrumb-parent')).toContainText('Renamed parent');
-  await expect(page.locator('.destination')).toContainText('Renamed parent');
   expect(await canvas!.evaluate((element) => element.isConnected)).toBe(true);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect
@@ -475,7 +483,7 @@ test('renaming an open parent folder retains the editor, saves to the new path a
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Child', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+  await page.locator('.title-button').click();
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill('Mobile child');
   await page.screenshot({ path: 'test-results/inline-canvas-mobile.png' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -484,105 +492,77 @@ test('renaming an open parent folder retains the editor, saves to the new path a
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
-test('sidebar pencils share a live name draft with the topbar without moving files per keystroke', async ({
+test('inline drafts synchronize between the current tree row and title without moving files per keystroke', async ({
   page,
   request,
 }) => {
   await page.goto('/');
   await create(page, 'Shared name');
-  const cardBox = await page.locator('.active-card').boundingBox();
-  const context = await page.locator('.active-context').elementHandle();
-  const status = await page.locator('.active-state').elementHandle();
+  const row = page.locator('[data-entry-path="Shared name.excalidraw"]');
+  await expect(row).toHaveAttribute('aria-current', 'page');
   const heading = await page.locator('.document-title h1').elementHandle();
-  const tools = await page.locator('.document-tools').elementHandle();
   const canvas = await page.locator('.excalidraw canvas.interactive').elementHandle();
   const moves: string[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/move')
       moves.push(request.postData()!);
   });
-  await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+  await page.locator('.title-button').click();
   const input = page.getByRole('textbox', { name: 'Canvas name', exact: true });
   await input.fill('');
   for (const letter of 'Live draft') {
     const previous = await input.inputValue();
     await input.pressSequentially(letter);
-    await expect(page.locator('.active-title')).toHaveText(previous + letter);
+    await expect(row.locator('.file-name')).toHaveText(previous + letter);
   }
   expect(moves).toHaveLength(0);
-  await page.getByRole('button', { name: 'Rename Live draft in sidebar', exact: true }).click();
-  await expect(page.locator('.active-card input')).toBeFocused();
+  await row.hover();
+  await row.locator('.row-rename').click();
+  await expect(row.locator('input')).toBeFocused();
   await expect(input).toHaveValue('Live draft');
-  expect(await page.locator('.active-card').boundingBox()).toEqual(cardBox);
-  for (const element of [context, status, heading, tools])
-    expect(await element!.evaluate((node) => node.isConnected)).toBe(true);
-  await expect(page.locator('.active-context')).toBeVisible();
-  await expect(page.locator('.active-state')).toBeVisible();
   await input.fill('Sidebar draft');
   await expect(page.getByRole('heading', { name: 'Sidebar draft', exact: true })).toBeVisible();
-  expect(moves).toHaveLength(0);
-  await page.screenshot({ path: 'test-results/shared-name-sidebar.png' });
-  await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+  await page.locator('.title-button').click();
   await expect(page.locator('.document-title input')).toBeFocused();
   await expect(input).toHaveValue('Sidebar draft');
-  expect(await heading!.evaluate((node) => node.isConnected)).toBe(true);
-  await expect(page.locator('.document-tools')).toBeVisible();
-  await page.screenshot({ path: 'test-results/shared-name-topbar.png' });
   expect(moves).toHaveLength(0);
+  expect(await heading!.evaluate((node) => node.isConnected)).toBe(true);
   await input.press('Escape');
-  await expect(page.locator('.active-title')).toHaveText('Shared name');
-  await expect(page.getByRole('heading', { name: 'Shared name', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Rename Shared name in sidebar', exact: true }).click();
+  await expect(row.locator('.file-name')).toHaveText('Shared name');
+  await row.focus();
+  await page.keyboard.press('F2');
   await input.fill('Committed name');
   await input.press('Enter');
-  await expect(page.locator('.active-title')).toHaveText('Committed name');
   await expect(page.getByRole('heading', { name: 'Committed name', exact: true })).toBeVisible();
   expect(moves).toHaveLength(1);
-  expect(await canvas!.evaluate((element) => element.isConnected)).toBe(true);
+  expect(await canvas!.evaluate((node) => node.isConnected)).toBe(true);
   expect((await document(request, 'Committed name.excalidraw')).path).toBe(
     'Committed name.excalidraw',
   );
   await create(page, 'Another canvas');
-  const row = page.locator('[data-entry-path="Committed name.excalidraw"]');
-  await row.scrollIntoViewIfNeeded();
-  const icon = await row.locator('.file-icon').elementHandle();
-  const date = await row.locator('time').elementHandle();
-  const rowBox = await row.boundingBox();
-  await page.getByRole('button', { name: 'Rename Committed name', exact: true }).click();
-  for (const element of [icon, date])
-    expect(await element!.evaluate((node) => node.isConnected)).toBe(true);
-  await expect(row.locator('time')).toBeVisible();
-  expect(await row.boundingBox()).toEqual(rowBox);
-  await page.screenshot({ path: 'test-results/shared-name-row.png' });
-  await expect(input).toBeFocused();
+  const inactive = page.locator('[data-entry-path="Committed name.excalidraw"]');
+  await inactive.focus();
+  await page.keyboard.press('F2');
   await input.fill('Inactive rename');
   await input.press('Enter');
-  await expect(page.getByRole('button', { name: 'Inactive rename', exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('Inactive');
-  await page.getByRole('button', { name: 'Rename Inactive rename', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Search canvases' })).toHaveValue('Inactive');
+  const filtered = page.locator('[data-entry-path="Inactive rename.excalidraw"]');
+  await filtered.focus();
+  await page.keyboard.press('F2');
   await input.fill('Search draft');
   await expect(page.locator('.file-row')).toHaveCount(1);
   await input.press('Escape');
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('');
   await expect(page.getByRole('heading', { name: 'Another canvas', exact: true })).toBeVisible();
-  expect(
-    await page
-      .locator('.title-button')
-      .evaluate((button) => button.scrollWidth <= button.clientWidth),
-  ).toBe(true);
   await page.screenshot({ path: 'test-results/shared-name-desktop.png' });
+  await page.locator('.title-button').focus();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Open explorer', exact: true }).click();
-  await page.getByRole('button', { name: 'Rename Another canvas in sidebar', exact: true }).click();
-  const mobileCardBox = await page.locator('.active-card').boundingBox();
-  await expect(page.locator('.active-card input')).toBeFocused();
-  await expect(page.locator('.active-context')).toBeVisible();
-  await expect(page.locator('.active-state')).toBeVisible();
+  await page.getByRole('button', { name: 'Actions for Another canvas', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
   await input.fill('Mobile sidebar');
-  expect(await page.locator('.active-card').boundingBox()).toEqual(mobileCardBox);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: 'test-results/shared-name-mobile.png' });
   await input.press('Enter');
-  await expect(page.locator('.active-title')).toHaveText('Mobile sidebar');
+  await expect(page.locator('[data-entry-path="Mobile sidebar.excalidraw"]')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

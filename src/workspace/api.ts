@@ -1,4 +1,11 @@
-import type { Document, Entry, HistoryEntry, Scene, TrashEntry } from '../../shared/model';
+import type {
+  Document,
+  Entry,
+  HistoryEntry,
+  LibraryProperty,
+  Scene,
+  TrashEntry,
+} from '../../shared/model';
 
 export class ApiError extends Error {
   constructor(
@@ -43,9 +50,13 @@ export const api = {
   create: (path: string, kind: Entry['kind'], scene?: Scene) =>
     request<Document>('/entries', { path, kind, scene }),
   move: (from: string, to: string) => request('/move', { from, to }),
-  trash: (path: string) => request('/trash', { path }),
+  trash: (path: string) => request<TrashEntry>('/trash', { path }),
   listTrash: () => request<TrashEntry[]>('/trash'),
+  // Without path: the original location, or a readable "(restored)" name if it is occupied.
   restore: (id: string, path?: string) => request<{ path: string }>('/restore', { id, path }),
+  setLibrary: (paths: string[], property: LibraryProperty, value: boolean) =>
+    request<{ ok: true }>('/library', { property, paths, value }),
+  order: (folder: string, paths: string[]) => request<{ ok: true }>('/order', { folder, paths }),
   history: (path: string) => request<HistoryEntry[]>(`/history${query(path)}`),
   historical: (path: string, revision: string) =>
     request<Scene>(`/history/document${query(path)}&revision=${revision}`),
