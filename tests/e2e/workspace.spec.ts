@@ -545,8 +545,12 @@ test('inline drafts synchronize between the current tree row and title without m
   await page.keyboard.press('F2');
   await input.fill('Inactive rename');
   await input.press('Enter');
-  await page.getByRole('textbox', { name: 'Search canvases' }).fill('Inactive');
+  await expect(input).toHaveCount(0);
   const filtered = page.locator('[data-entry-path="Inactive rename.excalidraw"]');
+  await expect(filtered).toBeVisible();
+  await expect(filtered).not.toHaveClass(/pending/);
+  await page.getByRole('textbox', { name: 'Search canvases' }).fill('Inactive');
+  await expect(page.locator('.file-row')).toHaveCount(1);
   await filtered.focus();
   await page.keyboard.press('F2');
   await input.fill('Search draft');
