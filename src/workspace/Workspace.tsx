@@ -94,10 +94,10 @@ const sortOptions: { value: SortMode; label: string }[] = [
   { value: 'custom', label: 'Custom order' },
 ];
 const views: { id: View; label: string; icon: () => JSX.Element }[] = [
-  { id: 'library', label: 'Library', icon: () => <Library size={15} /> },
-  { id: 'favorites', label: 'Favorites', icon: () => <Star size={15} /> },
-  { id: 'archive', label: 'Archive', icon: () => <Archive size={15} /> },
-  { id: 'trash', label: 'Trash', icon: () => <Trash2 size={15} /> },
+  { id: 'library', label: 'Library', icon: () => <Library size={18} aria-hidden="true" /> },
+  { id: 'favorites', label: 'Favorites', icon: () => <Star size={18} aria-hidden="true" /> },
+  { id: 'archive', label: 'Archive', icon: () => <Archive size={18} aria-hidden="true" /> },
+  { id: 'trash', label: 'Trash', icon: () => <Trash2 size={18} aria-hidden="true" /> },
 ];
 const dateTime = (value: string) =>
   new Date(value).toLocaleString('en', {
@@ -1487,7 +1487,6 @@ export function Workspace() {
                   onClick={() => committed(() => chooseView(item.id))}
                 >
                   {item.icon()}
-                  <span>{item.label}</span>
                 </button>
               )}
             </For>
