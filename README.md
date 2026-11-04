@@ -11,6 +11,8 @@ The integration uses `@excalidraw/excalidraw` and its public API. The editor rem
 a dependency; this repository adds document management and a file service. It does
 not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
+![Excalidraws workspace with the canvas library and a creative process diagram](docs/screenshots/workspace.png)
+
 ## Usage
 
 - The Library keeps every canvas in its folder, including the one you are drawing on.
