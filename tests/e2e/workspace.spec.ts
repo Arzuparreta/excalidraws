@@ -8,7 +8,21 @@ async function create(page: Page, name: string) {
   await expect(newCanvas).toBeEnabled();
   const root = page.getByRole('button', { name: 'Create in root', exact: true });
   if (await root.isVisible()) await root.click();
+  const createdResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/entries' &&
+      response.request().method() === 'POST' &&
+      response.status() === 201,
+  );
   await newCanvas.click();
+  const created: Document = await (await createdResponse).json();
+  await expect(page).toHaveURL((url) => url.searchParams.get('canvas') === created.path);
+  await expect(page.locator('.title-button')).toHaveText(
+    created.path
+      .split('/')
+      .at(-1)!
+      .replace(/\.excalidraw$/, ''),
+  );
   await expect(page.locator('.title-button')).toBeEnabled();
   await page.locator('.title-button').click();
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill(name);
@@ -545,8 +559,12 @@ test('inline drafts synchronize between the current tree row and title without m
   await page.keyboard.press('F2');
   await input.fill('Inactive rename');
   await input.press('Enter');
-  await page.getByRole('textbox', { name: 'Search canvases' }).fill('Inactive');
+  await expect(input).toHaveCount(0);
   const filtered = page.locator('[data-entry-path="Inactive rename.excalidraw"]');
+  await expect(filtered).toBeVisible();
+  await expect(filtered).not.toHaveClass(/pending/);
+  await page.getByRole('textbox', { name: 'Search canvases' }).fill('Inactive');
+  await expect(page.locator('.file-row')).toHaveCount(1);
   await filtered.focus();
   await page.keyboard.press('F2');
   await input.fill('Search draft');
