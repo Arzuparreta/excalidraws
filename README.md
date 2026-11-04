@@ -69,10 +69,11 @@ y revierten si falla el chequeo HTTP. El vault permanece fuera de las releases.
 
 ```sh
 npm run build
-node scripts/install-service.mjs --dry-run
-node scripts/install-service.mjs
-# Para acceder desde tu LAN o Tailscale:
-node scripts/install-service.mjs --host 0.0.0.0 --port 3001
+node scripts/install-service.mjs --dry-run --host 0.0.0.0 --port 3000
+# Acceso desde localhost, LAN y Tailscale:
+node scripts/install-service.mjs --host 0.0.0.0 --port 3000
+# Para limitarlo a localhost:
+# node scripts/install-service.mjs --port 3000
 ```
 
 Por defecto: `~/.local/share/excalidraws/vault`. El instalador respeta `XDG_DATA_HOME`

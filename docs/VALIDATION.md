@@ -21,9 +21,9 @@ Comprobado en `desktop` el 4 de noviembre de 2026.
 ## Servicio instalado
 
 - Unidad: `excalidraws.service`, habilitada y activa.
-- Escucha: `0.0.0.0:3001`.
-- Aplicación y API comprobadas en `http://127.0.0.1:3001` y
-  `http://100.91.167.48:3001` desde el desktop.
+- Escucha: `0.0.0.0:3000`.
+- Aplicación y API comprobadas en `http://127.0.0.1:3000` y
+  `http://100.91.167.48:3000` desde el desktop.
 - Vault: `/home/arsu/.local/share/excalidraws/vault`.
 - Release: `/home/arsu/.local/share/excalidraws/releases/2026-11-04T00-26-12-987Z`.
 - El usuario tiene linger habilitado: el servicio puede arrancar sin sesión interactiva.
@@ -33,8 +33,11 @@ Comprobado en `desktop` el 4 de noviembre de 2026.
   El archivo de aceptación y su historial se retiraron después.
 - Se forzó un despliegue al puerto 3000, ya ocupado por el servicio anterior. Falló el chequeo
   y el instalador restauró la unidad válida del 3001, que volvió a responder correctamente.
-- La instalación anterior `excalidraw.service` permanece en el puerto 3000. No se han
-  modificado Tailscale ni los datos de los navegadores.
+- Posteriormente, por petición del usuario, se retiraron `excalidraw.service`, su contenedor
+  y la imagen Docker del frontend anterior. `excalidraws.service` pasó al puerto 3000;
+  el puerto 3001 quedó libre. Los archivos del vault conservaron sus SHA-256.
+  La unidad permanece habilitada y la página y la API responden en localhost y Tailscale.
+  No se han modificado Tailscale ni los datos de los navegadores.
 
 La comprobación móvil usa un viewport emulado; no es aceptación física en un teléfono.
 La conectividad de Tailscale se ha probado desde el desktop, no desde otro dispositivo.
