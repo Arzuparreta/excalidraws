@@ -8,7 +8,21 @@ async function create(page: Page, name: string) {
   await expect(newCanvas).toBeEnabled();
   const root = page.getByRole('button', { name: 'Create in root', exact: true });
   if (await root.isVisible()) await root.click();
+  const createdResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/entries' &&
+      response.request().method() === 'POST' &&
+      response.status() === 201,
+  );
   await newCanvas.click();
+  const created: Document = await (await createdResponse).json();
+  await expect(page).toHaveURL((url) => url.searchParams.get('canvas') === created.path);
+  await expect(page.locator('.title-button')).toHaveText(
+    created.path
+      .split('/')
+      .at(-1)!
+      .replace(/\.excalidraw$/, ''),
+  );
   await expect(page.locator('.title-button')).toBeEnabled();
   await page.locator('.title-button').click();
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill(name);
