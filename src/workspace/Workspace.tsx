@@ -1346,7 +1346,7 @@ export function Workspace() {
               aria-label="Previous canvas"
               title="Previous canvas"
               data-name-transition
-              disabled={w.navigation().index <= 0}
+              disabled={!w.canNavigate(-1)}
               onClick={() => void w.rename().then((saved) => saved && w.navigate(-1))}
             >
               <ArrowLeft size={17} />
@@ -1357,7 +1357,7 @@ export function Workspace() {
               aria-label="Next canvas"
               title="Next canvas"
               data-name-transition
-              disabled={w.navigation().index >= w.navigation().paths.length - 1}
+              disabled={!w.canNavigate(1)}
               onClick={() => void w.rename().then((saved) => saved && w.navigate(1))}
             >
               <ArrowRight size={17} />

@@ -344,6 +344,54 @@ test('crossing the drawer breakpoint preserves a move picker and browser Back sk
   await expect(page.locator('dialog')).toHaveCount(0);
 });
 
+test('sidebar navigation skips trashed visits and disables directions with no available canvas', async ({
+  page,
+  request,
+}) => {
+  for (const path of ['History A.excalidraw', 'History B.excalidraw', 'History C.excalidraw'])
+    await seed(request, path);
+  const previous = page.getByRole('button', { name: 'Previous canvas', exact: true });
+  const next = page.getByRole('button', { name: 'Next canvas', exact: true });
+  await page.goto('/?canvas=History%20A.excalidraw');
+  await ready(page);
+  await expect(previous).toBeDisabled();
+  await expect(next).toBeDisabled();
+  for (const name of ['History B', 'History C']) {
+    await row(page, `${name}.excalidraw`).locator('.file-select').click();
+    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+  }
+  await action(page, 'History B.excalidraw', 'Move to trash');
+  await expect(row(page, 'History B.excalidraw')).toHaveCount(0);
+  await expect(previous).toBeEnabled();
+  await previous.click();
+  await expect(page.getByRole('heading', { name: 'History A', exact: true })).toBeVisible();
+  await expect(previous).toBeDisabled();
+  await expect(next).toBeEnabled();
+  await next.click();
+  await expect(page.getByRole('heading', { name: 'History C', exact: true })).toBeVisible();
+  await expect(next).toBeDisabled();
+  await action(page, 'History A.excalidraw', 'Move to trash');
+  await expect(row(page, 'History A.excalidraw')).toHaveCount(0);
+  await expect(previous).toBeDisabled();
+  await expect(next).toBeDisabled();
+  await page.screenshot({ path: 'test-results/navigation-no-available-history.png' });
+
+  await page
+    .locator('.message.notice:visible')
+    .getByRole('button', { name: 'Undo', exact: true })
+    .click();
+  await expect(previous).toBeEnabled();
+  await previous.click();
+  await expect(page.getByRole('heading', { name: 'History A', exact: true })).toBeVisible();
+  await expect(next).toBeEnabled();
+  expect((await request.post('/api/trash', { data: { path: 'History C.excalidraw' } })).ok()).toBe(
+    true,
+  );
+  await expect(row(page, 'History C.excalidraw')).toHaveCount(0);
+  await expect(next).toBeDisabled();
+  await expect(previous).toBeDisabled();
+});
+
 test('folder arrow expands and collapses when clicking the chevron itself', async ({
   page,
   request,
