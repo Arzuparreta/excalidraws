@@ -1221,9 +1221,11 @@ export function Workspace() {
         }
         return;
       }
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k') {
-        // Ctrl+K belongs to the editor (links) while drawing; Ctrl+Shift+K works anywhere.
-        if (!event.shiftKey && target?.closest('.editor-area')) return;
+      const key = event.key.toLowerCase();
+      const globalSearch = event.shiftKey && key === 'f';
+      const explorerSearch = !event.shiftKey && key === 'k' && !target?.closest('.editor-area');
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && (globalSearch || explorerSearch)) {
+        // Preserve the editor's Ctrl/Cmd+K link shortcut; Ctrl/Cmd+Shift+F searches globally.
         event.preventDefault();
         focusSearch();
         return;
@@ -1373,7 +1375,7 @@ export function Workspace() {
               autocomplete="off"
               placeholder="Search canvases"
               aria-label="Search canvases"
-              aria-keyshortcuts="Control+K Control+Shift+K"
+              aria-keyshortcuts="Control+K Meta+K Control+Shift+F Meta+Shift+F"
               value={query()}
               onInput={(event) => setQuery(event.currentTarget.value)}
               onKeyDown={(event) => {
@@ -1397,7 +1399,7 @@ export function Workspace() {
             />
             <Show when={!coarse() && !query()}>
               <kbd class="search-shortcut" aria-hidden="true">
-                {/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ ⇧ K' : 'Ctrl ⇧ K'}
+                {/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ ⇧ F' : 'Ctrl ⇧ F'}
               </kbd>
             </Show>
             <Show when={query()}>
