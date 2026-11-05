@@ -490,9 +490,12 @@ export function CanvasTree(props: {
                 class="row-twisty"
                 classList={{ 'row-action': folder() && !current().flat }}
                 aria-hidden="true"
-                onClick={() =>
-                  folder() && !current().flat && props.onToggle(path, !current().expanded)
-                }
+                onClick={(event) => {
+                  if (!folder() || current().flat) return;
+                  // Toggling replaces the SVG target before the delegated row handler runs.
+                  event.stopPropagation();
+                  props.onToggle(path, !current().expanded);
+                }}
               >
                 <Show when={folder() && !current().flat}>
                   <Show when={current().expanded} fallback={<ChevronRight size={14} />}>
