@@ -212,8 +212,16 @@ body,
   width: 44px;
   height: 44px;
 }
-.workspace.coarse .view-tabs button.view-tab {
+.workspace.coarse .view-switch button.view-tab,
+.workspace.coarse .list-header button.sort-button,
+.workspace.coarse .sidebar-footer button.footer-view {
   height: 44px;
+}
+.workspace.coarse .new-split button {
+  height: 44px;
+}
+.workspace.coarse .new-split button.new-more {
+  width: 44px;
 }
 .workspace.coarse :where(input):not(:where(.excalidraw *)) {
   font-size: 16px;
@@ -263,19 +271,35 @@ kbd {
   margin-top: auto;
 }
 .sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   padding: 6px 0;
   border-top: 1px solid var(--line);
 }
-.workspace button.settings-button {
+.workspace .sidebar-footer button.footer-view {
   justify-content: flex-start;
-  min-height: var(--control);
-  padding: 0 8px;
+  height: var(--control);
+  min-height: 0;
+  padding: 0 9px 0 8px;
+  gap: 7px;
   border: 0;
   background: transparent;
   color: var(--muted);
 }
-.workspace button.settings-button:hover,
-.workspace button.settings-button[aria-expanded='true'] {
+.workspace .sidebar-footer button.footer-view:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.workspace .sidebar-footer button.footer-view[aria-current='true'] {
+  background: var(--accent-faint);
+  color: var(--accent-ink);
+  font-weight: 560;
+}
+.workspace .sidebar-footer button.settings-button {
+  margin-left: auto;
+}
+.workspace .sidebar-footer button.settings-button[aria-expanded='true'] {
   background: var(--hover);
   color: var(--ink);
 }
@@ -283,10 +307,6 @@ kbd {
   font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.3px;
-}
-.navigation-buttons {
-  display: flex;
-  margin-left: auto;
 }
 .sidebar-search {
   padding: 2px 0 8px;
@@ -337,65 +357,95 @@ kbd {
   height: 26px;
 }
 .explorer-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
-.workspace .explorer-actions button.new-canvas {
+/* One control: the main action, plus a menu with the other ways to add to the Library. */
+.new-split {
+  display: flex;
+  height: var(--control);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: 0 1px 2px #1d1d3a0d;
+}
+.new-split:hover {
+  border-color: var(--accent-line);
+}
+.workspace .new-split button {
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.workspace .new-split button:focus-visible {
+  outline-offset: -2px;
+}
+.workspace .new-split button.new-canvas {
   flex: 1;
   justify-content: flex-start;
-  height: var(--control);
   min-width: 0;
-  border-color: var(--line);
-  color: var(--ink);
+  padding: 0 10px;
+  border-radius: 7px 0 0 7px;
   font-weight: 560;
 }
-.workspace .explorer-actions button.new-canvas svg {
+.workspace .new-split button.new-canvas svg {
   color: var(--accent);
 }
-.workspace .explorer-actions button.new-canvas:hover {
-  border-color: var(--accent-line);
+.workspace .new-split button.new-more {
+  width: 32px;
+  padding: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0 7px 7px 0;
+  color: var(--muted);
+}
+.workspace .new-split button:hover,
+.workspace .new-split button.new-more[aria-expanded='true'] {
   background: var(--accent-faint);
+  color: var(--accent-ink);
+}
+.workspace .new-split button.new-canvas:hover {
+  color: var(--ink);
 }
 .explorer-navigation {
   display: contents;
 }
-.view-tabs {
+.view-switch {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-  padding: 3px;
-  margin-bottom: 6px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 4px;
+  border-radius: 9px;
   background: var(--tabs-bg);
 }
-.workspace .view-tabs button.view-tab {
+.workspace .view-switch button.view-tab {
   min-width: 0;
-  min-height: 34px;
-  height: 34px;
-  padding: 0;
+  min-height: 0;
+  height: 28px;
+  padding: 0 8px;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 560;
   transition:
     background-color 140ms ease,
     color 140ms ease,
     box-shadow 140ms ease;
 }
-.workspace .view-tabs button.view-tab:hover {
+.workspace .view-switch button.view-tab:hover {
   background: var(--tabs-hover);
   color: var(--ink);
 }
-.workspace .view-tabs button.view-tab[aria-selected='true'] {
+.workspace .view-switch button.view-tab[aria-current='true'] {
   background: var(--raised);
-  color: var(--accent-ink);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 1px 3px #1d1d3a14;
+  color: var(--ink);
+  box-shadow: 0 1px 3px #1d1d3a1f;
 }
+/* One row above the list: what it shows, how it is sorted and a way to select. */
 .list-header {
   display: flex;
   align-items: center;
@@ -404,24 +454,48 @@ kbd {
   padding: 0 0 2px 4px;
 }
 .list-title {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 620;
+}
+.list-summary {
+  display: flex;
+  align-items: baseline;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
+  white-space: nowrap;
+}
+.list-title + .list-summary {
+  margin-left: 6px;
 }
 .entry-count {
-  margin-left: 6px;
-  margin-right: auto;
-  color: var(--muted);
-  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
 .workspace .list-header button.icon-button {
   width: 28px;
   height: 28px;
 }
-.workspace .list-header button.icon-button[aria-pressed='true'] {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
+.workspace .list-header button.list-back {
+  margin-left: -4px;
+}
+.workspace .list-header button.sort-button {
+  height: 28px;
+  min-height: 0;
+  padding: 0 7px;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+.workspace .list-header button.sort-button:hover,
+.workspace .list-header button.sort-button[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--ink);
 }
 .explorer-panel {
   display: flex;
@@ -534,9 +608,8 @@ kbd {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  margin: 0 3px 0 2px;
+  width: 15px;
+  height: 15px;
   border: 1.5px solid var(--line-strong);
   border-radius: 4px;
   background: var(--raised);
@@ -600,10 +673,6 @@ kbd {
   height: 26px;
   opacity: 0;
 }
-.workspace .file-row button.row-rename {
-  width: 24px;
-  height: 24px;
-}
 .workspace .file-row:is(:hover, :focus-within, :focus-visible, .is-selected) button.row-action,
 .workspace .file-row button.row-menu[aria-expanded='true'] {
   opacity: 1;
@@ -611,13 +680,15 @@ kbd {
 .workspace .file-row.is-renaming button.row-action {
   display: none;
 }
-.workspace.coarse .file-row button.row-rename {
+.workspace .file-list.is-selecting .file-row button.row-create {
   display: none;
 }
-.workspace .file-list.is-selecting .file-row :is(button.row-rename, button.row-create) {
-  display: none;
-}
+/* Touch keeps every actions button visible, quieter than the one on the current row. */
 .workspace.coarse .file-row button.row-menu {
+  opacity: 0.75;
+}
+.workspace.coarse .file-row:is(.is-current, .is-selected) button.row-menu,
+.workspace.coarse .file-row button.row-menu[aria-expanded='true'] {
   opacity: 1;
 }
 .file-parent {
@@ -714,25 +785,25 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bulk-bar {
-  display: flex;
-  align-items: center;
+.list-header.bulk-bar {
   gap: 1px;
-  margin: 0 -10px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--line);
-  background: var(--raised);
+  margin: 0 -4px;
+  padding: 0 0 0 8px;
+  border-radius: 8px;
+  background: var(--accent-faint);
 }
 .bulk-count {
   flex: 1;
   min-width: 0;
-  padding-left: 4px;
   overflow: hidden;
   color: var(--ink-soft);
   font-size: 12.5px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.workspace .bulk-bar button.text-button.bulk-done {
+  min-height: 28px;
 }
 .explorer-messages {
   display: flex;
@@ -1032,6 +1103,11 @@ kbd {
 .workspace.drawer .topbar,
 .workspace.sidebar-closed .topbar {
   padding-left: max(6px, env(safe-area-inset-left));
+}
+.history-buttons {
+  display: flex;
+  flex-shrink: 0;
+  margin-right: 4px;
 }
 .document-title {
   display: flex;
@@ -1365,6 +1441,12 @@ kbd {
     display: none;
   }
 }
+@media (max-width: 359px) {
+  /* The narrowest phones keep the room for the title; the browser still goes back. */
+  .history-buttons {
+    display: none;
+  }
+}
 @media (max-height: 499px) {
   .topbar {
     height: calc(44px + env(safe-area-inset-top));
@@ -1372,51 +1454,61 @@ kbd {
   .sidebar-header {
     min-height: 44px;
   }
+  /* Search and creation share one row to leave four or more touch rows for the list. */
   .sidebar-search {
     position: absolute;
     top: 48px;
     left: 10px;
-    right: calc(3 * var(--control) + 18px);
+    right: calc(2 * var(--control) + 16px);
     padding: 0;
   }
   .search-field {
     height: var(--control);
   }
   .explorer-actions {
+    display: flex;
     justify-content: flex-end;
     min-height: var(--control);
     margin-top: 4px;
     padding: 0;
   }
-  .workspace .explorer-actions button.new-canvas {
+  .workspace .new-split button.new-canvas {
     flex: 0 0 var(--control);
     justify-content: center;
+    padding: 0;
   }
-  .explorer-actions .new-canvas span {
+  .new-split .new-canvas span {
     display: none;
+  }
+  .workspace .new-split button.new-more {
+    width: var(--control);
   }
   .explorer-navigation {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-bottom: 6px;
+    margin: 4px 0 6px;
   }
-  .view-tabs {
+  .view-switch {
     flex: 1;
     min-width: 0;
     margin-bottom: 0;
   }
-  .view-tab span,
-  .list-title,
-  .entry-count {
+  .explorer-navigation:has(.bulk-bar) .view-switch {
     display: none;
-  }
-  .workspace .view-tab svg {
-    display: block;
   }
   .list-header {
     flex-shrink: 0;
     padding: 0;
+  }
+  .list-header.bulk-bar {
+    flex: 1;
+    margin: 0;
+  }
+  .list-header .list-title,
+  .list-header .list-summary,
+  .sort-label {
+    display: none;
   }
   .sidebar-bottom {
     display: flex;
@@ -1428,18 +1520,26 @@ kbd {
     order: -1;
     border-top: 0;
   }
+  .workspace .sidebar-footer button.footer-view {
+    width: var(--control);
+    padding: 0;
+    justify-content: center;
+  }
+  .footer-view-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .workspace .sidebar-footer button.settings-button {
+    margin-left: 0;
+  }
   .sidebar-bottom .explorer-messages {
     flex: 1;
     min-width: 0;
     padding: 6px 0;
-  }
-  .workspace button.settings-button {
-    justify-content: center;
-    width: var(--control);
-    padding: 0;
-  }
-  .settings-button span {
-    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

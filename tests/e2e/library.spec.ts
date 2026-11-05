@@ -9,6 +9,7 @@ async function seed(request: APIRequestContext, path: string, kind: 'file' | 'fo
   expect((await request.post('/api/entries', { data: { path, kind } })).ok()).toBe(true);
 }
 const row = (page: Page, path: string) => page.locator(`[data-entry-path="${path}"]`);
+const explorer = (page: Page) => page.getByRole('complementary', { name: 'Canvas explorer' });
 async function action(page: Page, path: string, label: string) {
   const item = row(page, path);
   await item.hover();
@@ -36,7 +37,7 @@ test('favorites and archive synchronize across clients without changing the draw
   await other.goto(`/?canvas=${encodeURIComponent(path)}`);
   await ready(other);
   await action(page, path, 'Add to favorites');
-  await other.getByRole('tab', { name: 'Favorites', exact: true }).click();
+  await explorer(other).getByRole('button', { name: 'Favorites', exact: true }).click();
   await expect(row(other, path)).toBeVisible();
   await action(page, path, 'Archive');
   await expect(row(page, path)).toHaveCount(0);
@@ -46,11 +47,11 @@ test('favorites and archive synchronize across clients without changing the draw
   ).toBeVisible();
   expect(await canvas!.evaluate((element) => element.isConnected)).toBe(true);
   expect((await read(request, path)).revision).toBe(before.revision);
-  await page.getByRole('tab', { name: 'Archive', exact: true }).click();
+  await explorer(page).getByRole('button', { name: 'Archive', exact: true }).click();
   await expect(row(page, path)).toHaveAttribute('aria-current', 'page');
   await action(page, path, 'Unarchive');
   await expect(row(other, path)).toBeVisible();
-  await page.getByRole('tab', { name: 'Library', exact: true }).click();
+  await explorer(page).getByRole('button', { name: 'Library', exact: true }).click();
   await expect(row(page, path)).toHaveAttribute('aria-current', 'page');
   expect(await canvas!.evaluate((element) => element.isConnected)).toBe(true);
   await page.screenshot({ path: 'test-results/ux-desktop.png' });
@@ -96,7 +97,7 @@ test('bulk move, undo, custom order and duplicate retain the active drawing', as
   const done = page.getByRole('button', { name: 'Done', exact: true });
   if (await done.isVisible()) await done.click();
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('');
-  await page.getByRole('button', { name: 'Sort canvases', exact: true }).click();
+  await page.getByRole('button', { name: /^Sort canvases/ }).click();
   await page.getByRole('menuitemradio', { name: 'Custom order', exact: true }).click();
   await row(page, 'Batch C.excalidraw').focus();
   await page.keyboard.press('Alt+ArrowUp');
@@ -127,7 +128,7 @@ test('pointer drag moves into a folder and inserts in custom order; undo restore
   for (const path of ['Drag A.excalidraw', 'Drag B.excalidraw']) await seed(request, path);
   await page.goto('/?canvas=Drag%20A.excalidraw');
   await ready(page);
-  await page.getByRole('button', { name: 'Sort canvases', exact: true }).click();
+  await page.getByRole('button', { name: /^Sort canvases/ }).click();
   await page.getByRole('menuitemradio', { name: 'Custom order', exact: true }).click();
   const initial = (await entries(request))
     .filter((e) => !e.path.includes('/'))
@@ -344,14 +345,14 @@ test('crossing the drawer breakpoint preserves a move picker and browser Back sk
   await expect(page.locator('dialog')).toHaveCount(0);
 });
 
-test('sidebar navigation skips trashed visits and disables directions with no available canvas', async ({
+test('canvas navigation skips trashed visits and disables directions with no available canvas', async ({
   page,
   request,
 }) => {
   for (const path of ['History A.excalidraw', 'History B.excalidraw', 'History C.excalidraw'])
     await seed(request, path);
-  const previous = page.getByRole('button', { name: 'Previous canvas', exact: true });
-  const next = page.getByRole('button', { name: 'Next canvas', exact: true });
+  const previous = page.getByRole('button', { name: 'Back', exact: true });
+  const next = page.getByRole('button', { name: 'Forward', exact: true });
   await page.goto('/?canvas=History%20A.excalidraw');
   await ready(page);
   await expect(previous).toBeDisabled();
@@ -413,4 +414,55 @@ test('folder arrow expands and collapses when clicking the chevron itself', asyn
   await folder.locator('.row-twisty svg').click();
   await expect(child).toBeVisible();
   await page.screenshot({ path: 'test-results/folder-arrow-expanded.png' });
+});
+
+test('sidebar controls: one creation control, footer views with a way back, selection in place', async ({
+  page,
+  request,
+}) => {
+  await seed(request, 'Controls A.excalidraw');
+  await seed(request, 'Controls B.excalidraw');
+  await page.goto('/?canvas=Controls%20A.excalidraw');
+  await ready(page);
+  const side = explorer(page);
+
+  const more = side.getByRole('button', { name: 'More ways to create', exact: true });
+  await more.click();
+  const create = page.getByRole('menu', { name: 'More ways to create', exact: true });
+  await expect(create.getByRole('menuitem')).toHaveText([
+    'New folder',
+    'Import .excalidraw files…',
+  ]);
+  await page.keyboard.press('Escape');
+  await expect(create).toHaveCount(0);
+  await expect(more).toBeFocused();
+
+  const sort = side.getByRole('button', { name: 'Sort canvases: Recent changes', exact: true });
+  await expect(sort).toHaveText('Recent');
+
+  // Selecting swaps the row icon for a checkbox, so names keep their position.
+  const name = row(page, 'Controls B.excalidraw').locator('.file-name');
+  const before = (await name.boundingBox())!.x;
+  await side.getByRole('button', { name: 'Select items', exact: true }).click();
+  const actions = page.getByRole('group', { name: 'Selection actions' });
+  await expect(actions).toContainText('Nothing selected');
+  await expect(actions.getByRole('button', { name: 'Move selected', exact: true })).toHaveCount(0);
+  expect((await name.boundingBox())!.x).toBe(before);
+  await row(page, 'Controls B.excalidraw').click();
+  await expect(actions).toContainText('1 selected');
+  await expect(actions.getByRole('button', { name: 'Move selected', exact: true })).toBeVisible();
+  await actions.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(actions).toHaveCount(0);
+
+  const library = side.getByRole('button', { name: 'Library', exact: true });
+  const archive = side.getByRole('button', { name: 'Archive', exact: true });
+  await expect(library).toHaveAttribute('aria-current', 'true');
+  await archive.click();
+  await expect(archive).toHaveAttribute('aria-current', 'true');
+  await expect(library).not.toHaveAttribute('aria-current', 'true');
+  await expect(page.getByText('Nothing is archived.')).toBeVisible();
+  await side.getByRole('button', { name: 'Back to Library', exact: true }).click();
+  await expect(library).toHaveAttribute('aria-current', 'true');
+  await expect(row(page, 'Controls A.excalidraw')).toBeVisible();
+  await page.screenshot({ path: 'test-results/sidebar-controls-desktop.png' });
 });

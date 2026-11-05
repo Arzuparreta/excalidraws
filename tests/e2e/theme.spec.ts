@@ -40,9 +40,14 @@ test('system appearance is the default; manual themes persist and override live 
   await expect(option(page, 'System')).toBeFocused();
   const trigger = (await settings(page).boundingBox())!;
   const popup = (await menu(page).boundingBox())!;
-  expect(trigger.x).toBeLessThan(30);
+  const sidebar = (await page
+    .getByRole('complementary', { name: 'Canvas explorer' })
+    .boundingBox())!;
+  // Settings closes the footer row on the right; its menu opens upward inside the window.
+  expect(trigger.x + trigger.width).toBeGreaterThan(sidebar.x + sidebar.width - 30);
   expect(trigger.y).toBeGreaterThan(page.viewportSize()!.height - 60);
   expect(popup.y + popup.height).toBeLessThanOrEqual(trigger.y);
+  expect(popup.x).toBeGreaterThanOrEqual(0);
   await page.screenshot({ path: 'test-results/theme-dark-desktop.png', animations: 'disabled' });
   await page.keyboard.press('Escape');
   await expect(settings(page)).toBeFocused();

@@ -11,35 +11,37 @@ The integration uses `@excalidraw/excalidraw` and its public API. The editor rem
 a dependency; this repository adds document management and a file service. It does
 not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
-![Excalidraws in dark mode with icon navigation and a canvas containing three basic shapes](docs/screenshots/workspace.png)
+![Excalidraws in dark mode with the canvas explorer and a canvas containing three basic shapes](docs/screenshots/workspace.png)
 
 ## Usage
 
-- Settings at the bottom left of the sidebar offers System, Light, and Dark themes.
-  System is the default and follows appearance changes immediately. A manual choice
-  applies to the workspace and editor and is remembered in this browser.
+- Settings, the gear at the bottom right of the sidebar, offers System, Light, and Dark
+  themes. System is the default and follows appearance changes immediately. A manual
+  choice applies to the workspace and editor and is remembered in this browser.
 - The Library keeps every canvas in its folder, including the one you are drawing on.
   Search by name or path; archived matches carry an Archive badge. Favorites provides
   quick access without moving files. Recent changes, Name, and Custom order are available.
-- New canvas and New folder create at the top level. Use a folder's own creation action
-  to create inside it. Default names are unique, including when another client creates
-  an item first. New folders offer inline naming immediately; Escape keeps the default.
-- Click the canvas title to rename it. On desktop, a pencil appears beside a row's name
-  on hover or keyboard focus. Touch users can choose Rename from the visible `…` menu.
-  Enter or the checkmark saves, Escape cancels, and leaving the field saves. A single
-  draft keeps the header and row name synchronized without changing the file per keystroke.
+- New canvas creates at the top level; the arrow beside it offers New folder and Import.
+  Use a folder's own `+` action to create inside it. Default names are unique, including
+  when another client creates an item first. New folders offer inline naming immediately;
+  Escape keeps the default.
+- Click the canvas title to rename it. In the explorer, press F2 on a row or choose
+  Rename from its `…` menu. Enter or the checkmark saves, Escape cancels, and leaving the
+  field saves. A single draft keeps the header and row name synchronized without changing
+  the file per keystroke.
 - The `…` menu and right-click provide contextual actions. Move uses a searchable folder
   picker with a top-level destination and a move-out shortcut. Desktop dragging moves
   into folders; Custom order also supports insertion between rows. Move up/down and
   keyboard controls provide alternatives to dragging.
 - Select several items to move, archive, or trash them together. Selecting a folder already
   includes its contents. Duplicate makes a separate canvas, including for inactive files.
-- Archive hides completed work without changing its file path. Open Archive in the explorer
-  to bring it back. An archived canvas can remain open and editable. Favorites, archive,
-  and custom order are shared between devices through private workspace metadata.
-- Sending an item to Trash is immediate and offers Undo. Trash stays inside the explorer;
-  restore recreates missing parent folders and chooses a free name if the original is
-  occupied. No existing file is replaced. Moves, archive changes, and custom order also
+- Archive hides completed work without changing its file path. Open Archive from the
+  explorer footer to bring it back; Back to Library returns to the tree. An archived
+  canvas can remain open and editable. Favorites, archive, and custom order are shared
+  between devices through private workspace metadata.
+- Sending an item to Trash is immediate and offers Undo. Trash, in the explorer footer,
+  stays inside the explorer; restore recreates missing parent folders and chooses a free
+  name if the original is occupied. No existing file is replaced. Moves, archive changes, and custom order also
   offer Undo. Dismissing Undo does not remove items from Trash.
 - The explorer supports keyboard navigation, F2 to rename, and contextual-menu keys.
   Organization shortcuts are scoped to the explorer so they do not replace drawing tools.
@@ -48,9 +50,10 @@ not maintain an editor fork or provide an installable plugin for excalidraw.com.
 - Hide the sidebar for more drawing space. Below 1024 px, or in a viewport shorter than
   500 px, it becomes an overlay drawer. Its focus stays contained while open. Touch
   controls have larger targets, and rare document actions move into the topbar menu.
-- Each canvas has a `?canvas=` URL. Browser Back/Forward navigates canvases; renaming or
-  moving updates the current location. Opening another canvas flushes the current drawing
-  first. Failed loads preserve it; rapid selections cancel obsolete loads.
+- Each canvas has a `?canvas=` URL. Browser Back/Forward and the topbar arrows navigate
+  opened canvases; renaming or moving updates the current location. Opening another canvas
+  flushes the current drawing first. Failed loads preserve it; rapid selections cancel
+  obsolete loads.
 - Changes save automatically after a short pause, with a save scheduled within four seconds
   of continuous edits. Only one editor is mounted. Renaming, moving, favoriting, archiving,
   and ordering preserve the active editor, viewport, and drawing undo/redo history.
