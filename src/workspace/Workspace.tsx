@@ -24,15 +24,15 @@ import {
   ChevronRight,
   CircleAlert,
   Copy,
+  CornerDownRight,
   CornerLeftUp,
   Ellipsis,
   FilePlus2,
   FileText,
-  Folder,
-  FolderInput,
-  FolderPlus,
   History,
   Import,
+  Link2,
+  Link2Off,
   ListChecks,
   LocateFixed,
   PanelLeft,
@@ -48,20 +48,25 @@ import {
   X,
 } from 'lucide-solid';
 import type { TrashEntry } from '../../shared/model';
+import { linkedCanvas } from '../../shared/canvas';
 import { EditorSurface } from '../editor/EditorSurface';
+import { CanvasPicker } from './CanvasPicker';
 import { CanvasTree, type DropTarget, type TreeApi } from './CanvasTree';
 import { createWorkspace } from './controller';
 import { InlineName } from './InlineName';
-import { MovePicker } from './MovePicker';
 import { Popover, type DismissReason } from './Popover';
 import { createTheme, themeOptions } from './theme';
 import {
   ancestors,
   buildRows,
+  childFolder,
+  compareEntries,
   displayName,
+  folderCanvas,
   folderLabel,
   insertRelative,
   isInside,
+  locationLabel,
   parentOf,
   pathTitle,
   readSetting,
@@ -80,6 +85,8 @@ const DRAWER_QUERY = '(max-width: 1023px), (max-height: 499px)';
 const COARSE_QUERY = '(pointer: coarse)';
 const FINE_QUERY = '(pointer: fine)';
 const SLOW_BUSY_MS = 400;
+// The topbar names at most this many containing canvases before the current one.
+const BREADCRUMB_DEPTH = 2;
 
 const statusLabels = {
   saved: 'Saved',
@@ -138,6 +145,8 @@ type Layer = 'sidebar' | 'topbar';
 type Pop = { anchor: HTMLElement; point?: Point; layer: Layer; restore(): void } & (
   | { kind: 'row'; path: string }
   | { kind: 'create'; folder: string }
+  | { kind: 'link' }
+  | { kind: 'unlinked' }
   | { kind: 'sort' }
   | { kind: 'settings' }
   | { kind: 'move'; paths: string[] }
@@ -229,6 +238,33 @@ export function Workspace() {
     }),
   );
   const selecting = () => selectMode() || selected().size > 0;
+  // Canvases directly inside the open one that no element of its drawing links to.
+  const linkedPaths = createMemo(() => {
+    const result = new Set<string>();
+    for (const link of w.editorState()?.links ?? []) {
+      const path = linkedCanvas(link, window.location.origin);
+      if (path) result.add(path);
+    }
+    return result;
+  });
+  const unlinked = createMemo(() => {
+    const path = activePath();
+    if (!path || !w.editorState()) return [];
+    const folder = childFolder(path);
+    return entries()
+      .filter(
+        (entry) =>
+          parentOf(entry.path) === folder && !entry.archived && !linkedPaths().has(entry.path),
+      )
+      .sort(compareEntries(sort() === 'recent' ? 'name' : sort()));
+  });
+  const breadcrumb = createMemo(() => {
+    const all = ancestors(activePath()).reverse();
+    return {
+      hidden: Math.max(0, all.length - BREADCRUMB_DEPTH),
+      shown: all.slice(-BREADCRUMB_DEPTH),
+    };
+  });
   const activeName = () =>
     w.renaming()?.path === activePath() ? w.renaming()!.name : pathTitle(activePath());
   const editingActiveIn = (location: Layer) =>
@@ -414,23 +450,21 @@ export function Workspace() {
     selected().has(path) && selected().size > 1 ? topLevel(selected()) : [path];
 
   // Explorer operations. The controller queues them; nothing here blocks drawing.
-  const createIn = async (kind: 'file' | 'folder', folder: string) => {
+  /** Creates and opens a canvas inside the canvas that owns `folder` ('' is the top level). */
+  const createIn = async (folder: string) => {
     if ((await commit()) === undefined) return;
     closePop(false);
     batch(() => {
-      if (folder) expandTo(folder, true);
+      if (folder) expandTo(folderCanvas(folder), true);
       setQuery('');
       if (view() !== 'library') setView('library');
       setRenameLocation('sidebar');
     });
-    const path = await attempt(() => w.create(kind, folder));
+    const path = await attempt(() => w.create(folder));
     if (!path) return;
-    if (kind === 'folder') reveal(path);
-    else {
-      reveal(path);
-      // A new canvas is an explicit choice of what to draw next.
-      if (drawerMode() && drawerOpen()) closeExplorer();
-    }
+    reveal(path);
+    // A new canvas is an explicit choice of what to draw next.
+    if (drawerMode() && drawerOpen()) closeExplorer();
   };
   const neighbourAfter = (removed: string[]) => {
     const list = rows().map((row) => row.entry.path);
@@ -488,7 +522,7 @@ export function Workspace() {
     const moved = await attempt(() => w.move(topLevel(paths), folder, placement));
     if (!moved?.length) return moved;
     clearSelection();
-    if (folder) expandTo(folder, true);
+    if (folder) expandTo(folderCanvas(folder), true);
     const first = moved[0]!;
     if (hadFocus) reveal(first, true);
     else reveal(first);
@@ -521,6 +555,11 @@ export function Workspace() {
   const drop = async (paths: string[], target: DropTarget) => {
     const moving = topLevel(paths);
     if ((await commit()) === undefined) return;
+    if (target.kind === 'link') {
+      const links = moving.filter((path) => path !== activePath());
+      if (links.length) w.insertLinks(links, { x: target.x, y: target.y });
+      return;
+    }
     if (target.kind === 'into') return void (await moveItems(moving, target.folder));
     const folder = parentOf(target.path);
     if (moving.every((path) => parentOf(path) === folder))
@@ -542,20 +581,16 @@ export function Workspace() {
       if (opened && fromDrawer) titleButton?.focus();
     });
   };
-  const activate = (row: Row) => {
-    const path = row.entry.path;
-    if (row.entry.kind === 'file') return openFile(path);
-    if (row.flat) {
-      // Search and Favorites are flat: a folder opens at its place in the hierarchy.
-      batch(() => {
-        setQuery('');
-        setView(row.entry.archived ? 'archive' : 'library');
-        expandTo(path, true);
-      });
-      queueMicrotask(() => tree?.focus(path));
-      return;
-    }
-    toggleFolder(path, !row.expanded);
+  // Every row is a canvas: activating it opens it. The chevron shows what is inside.
+  const activate = (row: Row) => openFile(row.entry.path);
+  /** Opens the canvas a link in the drawing points to. Returns false for other links. */
+  const openLink = (link: string) => {
+    const path = linkedCanvas(link, window.location.origin);
+    if (!path) return false;
+    if (!entryMap().has(path))
+      w.setError(`This link opens "${pathTitle(path)}", which is no longer in the library.`);
+    else committed(() => openFile(path));
+    return true;
   };
   const rowClick = (row: Row, event: MouseEvent) => {
     const path = row.entry.path;
@@ -622,13 +657,14 @@ export function Workspace() {
       restore: rowRestore(target),
     });
   };
-  const openCreateMenu = async (folder: string, anchor: HTMLElement) => {
+  /** The + menu of a row creates inside that canvas. */
+  const openCreateMenu = async (path: string, anchor: HTMLElement) => {
     if (pop()?.kind === 'create') return closePop(true);
-    const target = await commit(folder);
+    const target = await commit(path);
     if (target === undefined || !anchor.isConnected) return;
     setPop({
       kind: 'create',
-      folder: target,
+      folder: childFolder(target),
       anchor,
       layer: 'sidebar',
       restore: rowRestore(target),
@@ -668,6 +704,16 @@ export function Workspace() {
     if ((await commit()) === undefined) return;
     setPop({ kind: 'document', anchor, layer: 'topbar', restore: elementRestore(anchor) });
   };
+  const openLinkPanel = async (anchor: HTMLElement) => {
+    if (pop()?.kind === 'link') return closePop(true);
+    if ((await commit()) === undefined) return;
+    setPop({ kind: 'link', anchor, layer: 'topbar', restore: elementRestore(anchor) });
+  };
+  const openUnlinked = async (anchor: HTMLElement) => {
+    if (pop()?.kind === 'unlinked') return closePop(true);
+    if ((await commit()) === undefined) return;
+    setPop({ kind: 'unlinked', anchor, layer: 'topbar', restore: elementRestore(anchor) });
+  };
   const openHistory = async (anchor: HTMLElement) => {
     if (pop()?.kind === 'history') return closePop(true);
     if ((await commit()) === undefined) return;
@@ -687,9 +733,7 @@ export function Workspace() {
   const renderRename = () => (
     <InlineName
       value={w.renaming()!}
-      label={
-        entryMap().get(w.renaming()?.path ?? '')?.kind === 'folder' ? 'Folder name' : 'Canvas name'
-      }
+      label="Canvas name"
       busy={w.pendingPaths().has(w.renaming()?.path ?? '')}
       onInput={(name) => w.setRenaming((value) => value && { ...value, name, error: '' })}
       onSave={async (restoreFocus) => {
@@ -760,26 +804,21 @@ export function Workspace() {
                 keys="F2"
                 onSelect={() => void startRename(props.path, 'sidebar')}
               />
-              <Show when={item().kind === 'folder' && !item().archived}>
+              <Show when={!item().archived}>
                 <MenuItem
                   icon={<FilePlus2 size={15} />}
-                  label="New canvas here"
-                  onSelect={() => run(() => createIn('file', props.path), false)}
-                />
-                <MenuItem
-                  icon={<FolderPlus size={15} />}
-                  label="New folder here"
-                  onSelect={() => run(() => createIn('folder', props.path), false)}
+                  label="New canvas inside"
+                  onSelect={() => run(() => createIn(childFolder(props.path)), false)}
                 />
                 <MenuItem
                   icon={<Import size={15} />}
-                  label="Import here…"
-                  onSelect={() => run(() => w.importFiles(props.path))}
+                  label="Import inside…"
+                  onSelect={() => run(() => w.importFiles(childFolder(props.path)))}
                 />
               </Show>
             </Show>
             <MenuItem
-              icon={<FolderInput size={15} />}
+              icon={<CornerDownRight size={15} />}
               label="Move to…"
               onSelect={() => {
                 const anchor = pop()?.anchor;
@@ -816,7 +855,7 @@ export function Workspace() {
                 onSelect={() => run((focus) => moveStep(props.path, 1, focus), false)}
               />
             </Show>
-            <Show when={!multiple() && item().kind === 'file'}>
+            <Show when={!multiple()}>
               <MenuItem
                 icon={<Copy size={15} />}
                 label="Duplicate"
@@ -838,7 +877,7 @@ export function Workspace() {
               label={
                 allArchived()
                   ? !multiple() && item().archiveRoot && item().archiveRoot !== props.path
-                    ? `Unarchive ${folderLabel(item().archiveRoot!)}`
+                    ? `Unarchive ${pathTitle(item().archiveRoot!)}`
                     : 'Unarchive'
                   : 'Archive'
               }
@@ -900,7 +939,23 @@ export function Workspace() {
             onSelect={() => void startRename(activePath(), 'topbar')}
           />
         </Show>
+        <Show when={entry() && !entry()!.archived}>
+          <MenuItem
+            icon={<FilePlus2 size={15} />}
+            label="New canvas inside"
+            onSelect={() => run(() => createIn(childFolder(activePath())), false)}
+          />
+        </Show>
         <Show when={drawerMode()}>
+          <MenuItem
+            icon={<Link2 size={15} />}
+            label="Link to canvas…"
+            onSelect={() => {
+              const anchor = more();
+              setPop(undefined);
+              if (anchor) void openLinkPanel(anchor);
+            }}
+          />
           <MenuItem
             icon={<History size={15} />}
             label="Version history"
@@ -925,7 +980,7 @@ export function Workspace() {
           {(item) => (
             <>
               <MenuItem
-                icon={<FolderInput size={15} />}
+                icon={<CornerDownRight size={15} />}
                 label="Move to…"
                 onSelect={() => {
                   const anchor = more();
@@ -942,7 +997,7 @@ export function Workspace() {
                 label={
                   item().archived
                     ? item().archiveRoot && item().archiveRoot !== item().path
-                      ? `Unarchive ${folderLabel(item().archiveRoot!)}`
+                      ? `Unarchive ${pathTitle(item().archiveRoot!)}`
                       : 'Unarchive'
                     : 'Archive'
                 }
@@ -970,6 +1025,61 @@ export function Workspace() {
     openExplorer('none');
     reveal(activePath(), true);
   };
+  const UnlinkedPanel = () => (
+    <div class="unlinked-panel">
+      <p class="popover-title">Not linked in {pathTitle(activePath())}</p>
+      <p class="popover-help">
+        These canvases are inside this one, but nothing in its drawing links to them.
+      </p>
+      <Show
+        when={unlinked().length}
+        fallback={<p class="popover-empty">Every canvas inside is linked.</p>}
+      >
+        <ul class="unlinked-list">
+          <For each={unlinked()}>
+            {(entry) => (
+              <li class="unlinked-row">
+                <FileText size={15} aria-hidden="true" />
+                <span class="unlinked-name" title={displayName(entry)}>
+                  {displayName(entry)}
+                </span>
+                <button
+                  type="button"
+                  class="text-button compact"
+                  aria-label={`Add a link to ${displayName(entry)}`}
+                  onClick={() => w.insertLinks([entry.path])}
+                >
+                  <Link2 size={14} />
+                  Add link
+                </button>
+                <button
+                  type="button"
+                  class="icon-button"
+                  aria-label={`Open ${displayName(entry)}`}
+                  title="Open"
+                  onClick={() => {
+                    closePop(false);
+                    openFile(entry.path);
+                  }}
+                >
+                  <ArrowRight size={15} />
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+        <Show when={unlinked().length > 1}>
+          <button
+            type="button"
+            class="text-button unlinked-all"
+            onClick={() => w.insertLinks(unlinked().map((entry) => entry.path))}
+          >
+            Add all as a list
+          </button>
+        </Show>
+      </Show>
+    </div>
+  );
   const HistoryPanel = () => (
     <div class="history-panel">
       <p class="popover-title">Version history</p>
@@ -1022,26 +1132,23 @@ export function Workspace() {
         // The root menu lists the alternatives to the New canvas button beside it.
         const root = !current.folder;
         return {
-          label: root ? 'More ways to create' : `New in ${folderLabel(current.folder)}`,
+          label: root ? 'More ways to create' : `New inside ${folderLabel(current.folder)}`,
           role: 'menu',
           body: (
             <>
-              <p class="popover-title">{root ? 'Add to Library' : folderLabel(current.folder)}</p>
+              <p class="popover-title">
+                {root ? 'Add to Library' : `Inside ${folderLabel(current.folder)}`}
+              </p>
               <Show when={!root}>
                 <MenuItem
                   icon={<FilePlus2 size={15} />}
-                  label="New canvas here"
-                  onSelect={() => void createIn('file', current.folder)}
+                  label="New canvas inside"
+                  onSelect={() => void createIn(current.folder)}
                 />
               </Show>
               <MenuItem
-                icon={<FolderPlus size={15} />}
-                label={root ? 'New folder' : 'New folder here'}
-                onSelect={() => void createIn('folder', current.folder)}
-              />
-              <MenuItem
                 icon={<Import size={15} />}
-                label={root ? 'Import .excalidraw files…' : 'Import here…'}
+                label={root ? 'Import .excalidraw files…' : 'Import inside…'}
                 onSelect={() => {
                   closePop(true);
                   w.importFiles(current.folder);
@@ -1101,29 +1208,106 @@ export function Workspace() {
             </>
           ),
         };
-      case 'move':
+      case 'move': {
+        const pick = (folder: string) => {
+          const hadFocus = current.layer === 'sidebar' && focusInExplorer();
+          closePop(current.layer === 'topbar');
+          void moveItems(current.paths, folder, hadFocus).then((moved) => {
+            if (hadFocus && !moved?.length) current.restore();
+          });
+        };
+        // A shared current location is shown but cannot be chosen again.
+        const parents = new Set(current.paths.map(parentOf));
+        const shared = parents.size === 1 ? [...parents][0]! : undefined;
         return {
-          label: 'Move to folder',
+          label: 'Move to canvas',
           role: 'dialog',
           body: (
-            <MovePicker
-              folders={w.folders() as LibraryEntry[]}
-              moving={current.paths}
+            <CanvasPicker
               title={
                 current.paths.length === 1
-                  ? `Move ${displayName(entryMap().get(current.paths[0]!) ?? { path: current.paths[0]!, kind: 'file' })}`
-                  : `Move ${current.paths.length} items`
+                  ? `Move ${pathTitle(current.paths[0]!)}`
+                  : `Move ${current.paths.length} canvases`
               }
-              onPick={(folder) => {
-                const hadFocus = current.layer === 'sidebar' && focusInExplorer();
-                closePop(current.layer === 'topbar');
-                void moveItems(current.paths, folder, hadFocus).then((moved) => {
-                  if (hadFocus && !moved?.length) current.restore();
-                });
+              help="Choose the canvas to put it inside."
+              canvases={entries().filter(
+                (entry) =>
+                  !entry.archived && !current.paths.some((path) => isInside(entry.path, path)),
+              )}
+              top="Top level"
+              current={shared === undefined ? undefined : folderCanvas(shared)}
+              currentLabel="Current location"
+              listLabel="Destination canvases"
+              actions={
+                <Show when={shared}>
+                  {(folder) => (
+                    <button
+                      class="picker-action"
+                      data-name-transition
+                      onClick={() => pick(parentOf(folder()))}
+                    >
+                      <CornerLeftUp size={15} />
+                      <span>
+                        Move out to <strong>{folderLabel(parentOf(folder()))}</strong>
+                      </span>
+                    </button>
+                  )}
+                </Show>
+              }
+              onPick={(path) => pick(path ? childFolder(path) : '')}
+            />
+          ),
+        };
+      }
+      case 'link': {
+        const selection = () => w.editorState()?.selection ?? { count: 0, text: '' };
+        const owner = activePath();
+        const name = () => selection().text.slice(0, 60);
+        return {
+          label: 'Link to canvas',
+          role: 'dialog',
+          body: (
+            <CanvasPicker
+              title={selection().count ? 'Link the selection' : 'Add a link'}
+              help={
+                selection().count
+                  ? 'The selected element will open the canvas you choose.'
+                  : 'Adds a label to the drawing that opens the canvas you choose.'
+              }
+              canvases={entries().filter((entry) => !entry.archived && entry.path !== owner)}
+              listLabel="Canvases to link"
+              actions={
+                <Show when={activeEntry() && !activeEntry()!.archived}>
+                  <button
+                    class="picker-action"
+                    data-name-transition
+                    onClick={() => {
+                      const text = selection().text;
+                      closePop(true);
+                      void attempt(() => w.createLinked(text)).then((path) => {
+                        if (path) expandTo(path);
+                      });
+                    }}
+                  >
+                    <FilePlus2 size={15} />
+                    <span>
+                      New canvas <Show when={name()}>“{name()}” </Show>inside{' '}
+                      <strong>{pathTitle(owner)}</strong>
+                    </span>
+                  </button>
+                </Show>
+              }
+              onPick={(path) => {
+                const linked = selection().count ? w.linkSelection(path) : w.insertLinks([path]);
+                closePop(true);
+                if (!linked) w.setError('The drawing is not ready yet. Try again in a moment.');
               }}
             />
           ),
         };
+      }
+      case 'unlinked':
+        return { label: 'Canvases not linked here', role: 'dialog', body: <UnlinkedPanel /> };
       case 'document':
         return { label: 'Canvas actions', role: 'menu', body: <DocumentMenu /> };
       case 'history':
@@ -1142,7 +1326,7 @@ export function Workspace() {
             role={content.role}
             class={`popover-${current.kind}`}
             id={current.kind === 'settings' ? 'settings-menu' : undefined}
-            align={current.kind === 'create' ? 'start' : 'end'}
+            align={current.kind === 'create' || current.kind === 'unlinked' ? 'start' : 'end'}
             onDismiss={dismissPop}
           >
             {content.body}
@@ -1226,10 +1410,8 @@ export function Workspace() {
       ? (w.trash()?.length ?? 0)
       : searching() || view() === 'favorites'
         ? rows().length
-        : entries().filter(
-            (entry) =>
-              entry.kind === 'file' && (view() === 'archive' ? entry.archived : !entry.archived),
-          ).length;
+        : entries().filter((entry) => (view() === 'archive' ? entry.archived : !entry.archived))
+            .length;
   const selectedItems = () =>
     [...selected()].map((path) => entryMap().get(path)).filter((e): e is LibraryEntry => !!e);
   const chooseView = (next: View) => {
@@ -1433,7 +1615,7 @@ export function Workspace() {
               aria-label="New canvas"
               data-name-transition
               title="New canvas in Library"
-              onClick={() => void createIn('file', '')}
+              onClick={() => void createIn('')}
             >
               <FilePlus2 size={16} />
               <span>New canvas</span>
@@ -1442,7 +1624,7 @@ export function Workspace() {
               type="button"
               class="new-more"
               aria-label="More ways to create"
-              title="New folder or import"
+              title="Import .excalidraw files"
               aria-haspopup="menu"
               aria-expanded={pop()?.kind === 'create' && !(pop() as { folder: string }).folder}
               data-menu-trigger
@@ -1551,7 +1733,7 @@ export function Workspace() {
                     );
                   }}
                 >
-                  <FolderInput size={17} />
+                  <CornerDownRight size={17} />
                 </button>
                 <button
                   type="button"
@@ -1696,6 +1878,12 @@ export function Workspace() {
                 onReorder={(path, delta) => void moveStep(path, delta)}
                 dragPaths={(path) => (selected().has(path) ? topLevel(selected()) : [path])}
                 onDrop={(paths, target) => void drop(paths, target)}
+                canLink={(paths, point) =>
+                  !!w.session() &&
+                  !w.switchTarget() &&
+                  paths.some((path) => path !== activePath()) &&
+                  w.pointInEditor(point)
+                }
                 ref={(api) => (tree = api)}
               />
             }
@@ -1715,16 +1903,22 @@ export function Workspace() {
                       {(item) => (
                         <li class="trash-row">
                           <span class="row-icon" aria-hidden="true">
-                            <Show when={item.kind === 'folder'} fallback={<FileText size={15} />}>
-                              <Folder size={15} />
-                            </Show>
+                            <FileText size={15} />
                           </span>
                           <span class="trash-text">
                             <span class="file-name" title={item.path}>
                               {displayName(item)}
                             </span>
                             <small>
-                              {folderLabel(parentOf(item.path))} · Deleted {dateTime(item.deleted)}
+                              {[
+                                locationLabel(item.path) || 'Library',
+                                item.inside
+                                  ? `${item.inside} ${item.inside === 1 ? 'canvas' : 'canvases'} inside`
+                                  : '',
+                                `Deleted ${dateTime(item.deleted)}`,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
                             </small>
                           </span>
                           <button
@@ -1829,18 +2023,40 @@ export function Workspace() {
           </div>
           <div class="document-title">
             <Show when={w.session()} fallback={<span class="empty-title">Excalidraws</span>}>
-              <Show when={parentOf(activePath())}>
-                <button
-                  type="button"
-                  class="breadcrumb-parent"
-                  aria-label={`Show ${parentOf(activePath())} in explorer`}
-                  title="Show in explorer"
-                  data-name-transition
-                  onClick={showInExplorer}
-                >
-                  {parentOf(activePath())}
-                </button>
-                <ChevronRight class="breadcrumb-chevron" size={13} />
+              <Show when={breadcrumb().shown.length}>
+                <nav class="breadcrumb" aria-label="Canvases containing this one">
+                  <Show when={breadcrumb().hidden}>
+                    <button
+                      type="button"
+                      class="breadcrumb-parent breadcrumb-more"
+                      aria-label={`Show ${locationLabel(activePath())} in explorer`}
+                      title={locationLabel(activePath())}
+                      data-name-transition
+                      onClick={showInExplorer}
+                    >
+                      …
+                    </button>
+                    <ChevronRight class="breadcrumb-chevron" size={13} aria-hidden="true" />
+                  </Show>
+                  <For each={breadcrumb().shown}>
+                    {(canvas) => (
+                      <>
+                        <button
+                          type="button"
+                          class="breadcrumb-parent"
+                          aria-label={`Open ${pathTitle(canvas)}`}
+                          title={`Open ${pathTitle(canvas)}`}
+                          data-name-transition
+                          disabled={!entryMap().has(canvas)}
+                          onClick={() => committed(() => openFile(canvas))}
+                        >
+                          {pathTitle(canvas)}
+                        </button>
+                        <ChevronRight class="breadcrumb-chevron" size={13} aria-hidden="true" />
+                      </>
+                    )}
+                  </For>
+                </nav>
               </Show>
               <div class="canvas-name">
                 <h1 title={activeName()} aria-label={activeName()}>
@@ -1873,7 +2089,7 @@ export function Workspace() {
                         class="text-button compact"
                         title={
                           entry().archiveRoot && entry().archiveRoot !== entry().path
-                            ? `Unarchive ${folderLabel(entry().archiveRoot!)}`
+                            ? `Unarchive ${pathTitle(entry().archiveRoot!)}`
                             : 'Unarchive this canvas'
                         }
                         onClick={() =>
@@ -1890,6 +2106,26 @@ export function Workspace() {
           </div>
           <Show when={w.session()}>
             <div class="document-tools">
+              <Show when={unlinked().length}>
+                <button
+                  type="button"
+                  class="unlinked-button"
+                  aria-label={`${unlinked().length} ${unlinked().length === 1 ? 'canvas' : 'canvases'} inside not linked here`}
+                  title="Canvases inside this one that the drawing does not link to"
+                  aria-haspopup="dialog"
+                  aria-expanded={pop()?.kind === 'unlinked'}
+                  data-menu-trigger
+                  onClick={(event) => void openUnlinked(event.currentTarget)}
+                >
+                  <span class="unlinked-pill">
+                    <Link2Off size={14} aria-hidden="true" />
+                    <span>
+                      {unlinked().length}
+                      <span class="unlinked-label"> not linked</span>
+                    </span>
+                  </span>
+                </button>
+              </Show>
               <span
                 class="save-status"
                 classList={{
@@ -1913,6 +2149,22 @@ export function Workspace() {
                 <span class="status-label">{statusLabels[w.state().status]}</span>
               </span>
               <Show when={!drawerMode()}>
+                <button
+                  type="button"
+                  class="icon-button"
+                  aria-label="Link to canvas"
+                  title={
+                    (w.editorState()?.selection.count ?? 0) > 0
+                      ? 'Link the selection to a canvas'
+                      : 'Add a link to a canvas'
+                  }
+                  aria-haspopup="dialog"
+                  aria-expanded={pop()?.kind === 'link'}
+                  data-menu-trigger
+                  onClick={(event) => void openLinkPanel(event.currentTarget)}
+                >
+                  <Link2 size={17} />
+                </button>
                 <button
                   type="button"
                   class="icon-button"
@@ -1942,7 +2194,8 @@ export function Workspace() {
                 title="More canvas actions"
                 aria-haspopup="menu"
                 aria-expanded={
-                  pop()?.kind === 'document' || (pop()?.kind === 'history' && drawerMode())
+                  pop()?.kind === 'document' ||
+                  ((pop()?.kind === 'history' || pop()?.kind === 'link') && drawerMode())
                 }
                 data-menu-trigger
                 onClick={(event) => void openDocumentMenu(event.currentTarget)}
@@ -2058,7 +2311,7 @@ export function Workspace() {
                       type="button"
                       class="primary"
                       data-name-transition
-                      onClick={() => void createIn('file', '')}
+                      onClick={() => void createIn('')}
                     >
                       <FilePlus2 size={16} />
                       Create canvas
@@ -2079,6 +2332,8 @@ export function Workspace() {
                 onImport={() => w.importFiles()}
                 onReady={w.setEditor}
                 onPending={w.setEditorPending}
+                onLinkOpen={openLink}
+                onState={w.setEditorState}
                 onError={(e) =>
                   w.setError(
                     e instanceof Error ? e.message : 'Could not load the editor. Reload to retry.',

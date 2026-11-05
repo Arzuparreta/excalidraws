@@ -2,7 +2,7 @@ import { test, expect, type Page, type APIRequestContext } from '@playwright/tes
 
 async function seed(request: APIRequestContext, name: string) {
   const result = await request.post('/api/entries', {
-    data: { path: `${name}.excalidraw`, kind: 'file' },
+    data: { path: `${name}.excalidraw` },
   });
   expect(result.ok()).toBe(true);
 }
@@ -180,14 +180,17 @@ test('large libraries render a bounded list, retain selection through search and
         await page.keyboard.press('Escape');
         await expect(page.getByRole('menu', { name: 'Sort canvases', exact: true })).toHaveCount(0);
         await expect(page.getByRole('complementary', { name: 'Canvas explorer' })).toBeVisible();
-        await page.getByRole('button', { name: 'More ways to create', exact: true }).click();
-        await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
-        await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toBeFocused();
+        await page.locator('[data-entry-path="ZZZ Library 299.excalidraw"]').focus();
+        await page.keyboard.press('F2');
+        const draft = page.getByRole('textbox', { name: 'Canvas name', exact: true });
+        await expect(draft).toBeFocused();
+        await draft.fill('ZZZ Library draft');
         // A filesystem notification must not silently commit the inline name draft.
         const count = Number(await page.locator('.list-header .entry-count').textContent());
         await seed(request, 'ZZZ Watch refresh');
         await expect(page.locator('.list-header .entry-count')).toHaveText(String(count + 1));
-        await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toBeFocused();
+        await expect(draft).toBeFocused();
+        await expect(draft).toHaveValue('ZZZ Library draft');
         await expect(page.getByRole('dialog')).toHaveCount(0);
         await page.keyboard.press('Escape');
         await expect(page.getByRole('dialog')).toHaveCount(0);

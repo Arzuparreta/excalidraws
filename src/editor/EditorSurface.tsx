@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import type { DocumentSession } from '../workspace/session';
 import type { ColorTheme } from '../workspace/theme';
-import type { EditorHandle } from './ExcalidrawAdapter';
+import type { EditorHandle, EditorState } from './ExcalidrawAdapter';
 
 // Each document owns one mounted React island. Cleanup releases its scene, canvases,
 // image cache and subscriptions before Solid mounts another document.
@@ -11,6 +11,8 @@ export function EditorSurface(props: {
   onImport(): void;
   onReady(handle: EditorHandle | undefined): void;
   onPending(pending: boolean): void;
+  onLinkOpen(link: string): boolean;
+  onState(state: EditorState | undefined): void;
   onError(error: unknown): void;
 }) {
   let container!: HTMLDivElement;
@@ -31,6 +33,8 @@ export function EditorSurface(props: {
         onChange: props.session.change,
         onImport: props.onImport,
         onPending: props.onPending,
+        onLinkOpen: (link) => props.onLinkOpen(link),
+        onState: (state) => props.onState(state),
       });
       props.onReady(handle);
       setLoading(false);
@@ -45,6 +49,7 @@ export function EditorSurface(props: {
     disposed = true;
     props.onReady(undefined);
     props.onPending(false);
+    props.onState(undefined);
     handle?.destroy();
   });
   return (

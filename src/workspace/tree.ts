@@ -1,4 +1,17 @@
 import type { Entry } from '../../shared/model';
+import {
+  EXTENSION,
+  ancestorCanvases,
+  canvasName,
+  childFolder,
+  folderCanvas,
+  folderOf,
+  inCanvas,
+  outermost,
+  parentCanvas,
+} from '../../shared/canvas';
+
+export { ancestorCanvases, childFolder, folderCanvas, inCanvas, parentCanvas };
 
 // Library metadata fields are optional so the UI also renders entries from older servers.
 export type LibraryEntry = Entry & {
@@ -12,44 +25,40 @@ export type View = 'library' | 'favorites' | 'archive' | 'trash';
 export interface Row {
   entry: LibraryEntry;
   depth: number;
+  /** The canvas has canvases inside it in this view, and they are shown. */
   expanded: boolean;
+  /** The canvas has canvases inside it in this view, shown or not. */
+  expandable: boolean;
+  /** Number of canvases directly inside it that this view can show. */
+  inside: number;
   posinset: number;
   setsize: number;
-  /** Flat rows (search, favorites) show their folder instead of an indented position. */
+  /** Flat rows (search, favorites) show their location instead of an indented position. */
   flat: boolean;
 }
 
 export const basename = (path: string) => path.split('/').at(-1) ?? path;
-export const parentOf = (path: string) =>
-  path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-export const displayName = (entry: Pick<Entry, 'path' | 'kind'>) =>
-  entry.kind === 'folder'
-    ? basename(entry.path)
-    : basename(entry.path).replace(/\.excalidraw$/, '');
-export const pathTitle = (path: string) => basename(path).replace(/\.excalidraw$/, '');
+/** The content folder that contains a canvas: siblings share it. '' is the top level. */
+export const parentOf = folderOf;
+export const displayName = (entry: Pick<Entry, 'path'>) => canvasName(entry.path);
+export const pathTitle = canvasName;
+/** Name of the canvas that owns a content folder; the top level is the Library. */
 export const folderLabel = (folder: string) => (folder ? basename(folder) : 'Library');
-export const isInside = (path: string, folder: string) =>
-  path === folder || path.startsWith(`${folder}/`);
-export const ancestors = (path: string) => {
-  const result: string[] = [];
-  for (let current = parentOf(path); current; current = parentOf(current)) result.push(current);
-  return result;
-};
-export const renamedPath = (entry: Pick<Entry, 'path' | 'kind'>, name: string) => {
+/** Names of the canvases that contain `path`, outermost first, such as `Ideas / Idea B`. */
+export const locationLabel = (path: string) =>
+  ancestorCanvases(path)
+    .reverse()
+    .map((canvas) => canvasName(canvas))
+    .join(' / ');
+export const ancestors = ancestorCanvases;
+export const renamedPath = (entry: Pick<Entry, 'path'>, name: string) => {
   const trimmed = name.trim();
-  const leaf =
-    entry.kind === 'file' && !trimmed.endsWith('.excalidraw') ? `${trimmed}.excalidraw` : trimmed;
-  const folder = parentOf(entry.path);
+  const leaf = trimmed.endsWith(EXTENSION) ? trimmed : `${trimmed}${EXTENSION}`;
+  const folder = folderOf(entry.path);
   return folder ? `${folder}/${leaf}` : leaf;
 };
-/** Keeps only top-level paths: moving or trashing a folder already includes its contents. */
-export const topLevel = (paths: Iterable<string>) => {
-  const sorted = [...new Set(paths)].sort((a, b) => a.length - b.length);
-  const result: string[] = [];
-  for (const path of sorted)
-    if (!result.some((kept) => path.startsWith(`${kept}/`))) result.push(path);
-  return result;
-};
+/** Keeps only outermost canvases: moving or trashing a canvas includes its contents. */
+export const topLevel = (paths: Iterable<string>) => outermost(paths);
 
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 const byName = (a: LibraryEntry, b: LibraryEntry) =>
@@ -63,16 +72,14 @@ export const compareEntries =
       if (ao !== bo) return ao < bo ? -1 : 1;
       return byName(a, b);
     }
-    if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
-    if (sort === 'recent' && a.kind === 'file' && a.modified !== b.modified)
-      return a.modified < b.modified ? 1 : -1;
+    if (sort === 'recent' && a.modified !== b.modified) return a.modified < b.modified ? 1 : -1;
     return byName(a, b);
   };
 
 const childrenOf = (entries: LibraryEntry[]) => {
   const children = new Map<string, LibraryEntry[]>();
   for (const entry of entries) {
-    const key = parentOf(entry.path);
+    const key = folderOf(entry.path);
     const group = children.get(key);
     if (group) group.push(entry);
     else children.set(key, [entry]);
@@ -80,10 +87,10 @@ const childrenOf = (entries: LibraryEntry[]) => {
   return children;
 };
 
-/** Every sibling in custom order, including archived ones, as the order endpoint expects. */
+/** Every canvas directly inside a content folder in custom order, archived ones included. */
 export const siblingOrder = (entries: LibraryEntry[], folder: string) =>
   entries
-    .filter((entry) => parentOf(entry.path) === folder)
+    .filter((entry) => folderOf(entry.path) === folder)
     .sort(compareEntries('custom'))
     .map((entry) => entry.path);
 
@@ -117,6 +124,8 @@ export function buildRows(options: {
       entry,
       depth: 0,
       expanded: false,
+      expandable: false,
+      inside: entry.children,
       posinset: index + 1,
       setsize: all.length,
       flat: true,
@@ -131,11 +140,7 @@ export function buildRows(options: {
       return 3;
     };
     return flat(
-      entries.filter((entry) =>
-        (entry.kind === 'file' ? entry.path.replace(/\.excalidraw$/, '') : entry.path)
-          .toLocaleLowerCase()
-          .includes(query),
-      ),
+      entries.filter((entry) => childFolder(entry.path).toLocaleLowerCase().includes(query)),
       (a, b) => rank(a) - rank(b) || compare(a, b),
     );
   }
@@ -149,12 +154,12 @@ export function buildRows(options: {
   let roots: LibraryEntry[];
   let include: (entry: LibraryEntry) => boolean;
   if (view === 'archive') {
-    // Explicitly archived items whose parent is not itself archived; folders keep their subtree.
+    // Explicitly archived canvases whose parent is not itself archived, with their contents.
     roots = entries.filter(
       (entry) =>
         entry.archived &&
         (entry.archiveRoot ?? entry.path) === entry.path &&
-        !byPath.get(parentOf(entry.path))?.archived,
+        !byPath.get(parentCanvas(entry.path))?.archived,
     );
     include = () => true;
   } else {
@@ -165,21 +170,28 @@ export function buildRows(options: {
   const visit = (list: LibraryEntry[], depth: number) => {
     const sorted = list.sort(compare);
     sorted.forEach((entry, index) => {
-      const expanded = entry.kind === 'folder' && !collapsed.has(entry.path);
+      const inside = (children.get(childFolder(entry.path)) ?? []).filter(include);
+      const expandable = inside.length > 0;
+      const expanded = expandable && !collapsed.has(entry.path);
       rows.push({
         entry,
         depth,
         expanded,
+        expandable,
+        inside: inside.length,
         posinset: index + 1,
         setsize: sorted.length,
         flat: false,
       });
-      if (expanded) visit((children.get(entry.path) ?? []).filter(include), depth + 1);
+      if (expanded) visit(inside, depth + 1);
     });
   };
   visit(roots, 0);
   return rows;
 }
+
+/** True when the canvas `path` is `root` or inside it. */
+export const isInside = (path: string, root: string) => inCanvas(path, root);
 
 export const readSetting = (key: string) => {
   try {

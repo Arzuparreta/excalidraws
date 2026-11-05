@@ -62,7 +62,7 @@ test('metadata changes are broadcast to connected clients', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'excalidraws-events-'));
   const vault = new Vault(root);
   await vault.init();
-  await vault.create('Plan.excalidraw', 'file');
+  await vault.create('Plan.excalidraw');
   const app = createApp(vault);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));

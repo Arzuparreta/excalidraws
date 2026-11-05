@@ -53,10 +53,8 @@ export function createApp(vault: Vault, clientDirectory?: string) {
     res.json({ revision: await vault.revision(getPath(req.query.path)) }),
   );
   app.post('/api/entries', async (req, res) => {
-    const body = z
-      .object({ path: z.string(), kind: z.enum(['file', 'folder']), scene: sceneSchema.optional() })
-      .parse(req.body);
-    res.status(201).json((await vault.create(body.path, body.kind, body.scene)) ?? { ok: true });
+    const body = z.object({ path: z.string(), scene: sceneSchema.optional() }).parse(req.body);
+    res.status(201).json(await vault.create(body.path, body.scene));
   });
   app.put('/api/document', async (req, res) => {
     const body = z
@@ -66,9 +64,10 @@ export function createApp(vault: Vault, clientDirectory?: string) {
     res.json({ revision: saved.revision });
   });
   app.post('/api/move', async (req, res) => {
-    const body = z.object({ from: z.string(), to: z.string() }).parse(req.body);
-    await vault.move(body.from, body.to);
-    res.json({ ok: true });
+    const body = z
+      .object({ from: z.string(), to: z.string(), exclude: z.string().optional() })
+      .parse(req.body);
+    res.json(await vault.move(body.from, body.to, body.exclude));
   });
   app.post('/api/trash', async (req, res) =>
     res.json(await vault.trash(z.object({ path: z.string() }).parse(req.body).path)),
@@ -127,9 +126,7 @@ export function createApp(vault: Vault, clientDirectory?: string) {
       if (error instanceof ZodError || error instanceof SyntaxError)
         return res.status(400).json({ error: 'Invalid data.', code: 'validation' });
       if (error.code === 'ENOENT')
-        return res
-          .status(404)
-          .json({ error: 'The file or folder no longer exists.', code: 'not_found' });
+        return res.status(404).json({ error: 'The canvas no longer exists.', code: 'not_found' });
       if (error.code === 'EEXIST')
         return res.status(409).json({ error: 'The name already exists.', code: 'exists' });
       if (error.status === 413)

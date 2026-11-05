@@ -5,8 +5,8 @@ const read = async (request: APIRequestContext, path: string): Promise<Document>
   (await request.get(`/api/document?path=${encodeURIComponent(path)}`)).json();
 const entries = async (request: APIRequestContext): Promise<Entry[]> =>
   (await request.get('/api/entries')).json();
-async function seed(request: APIRequestContext, path: string, kind: 'file' | 'folder' = 'file') {
-  expect((await request.post('/api/entries', { data: { path, kind } })).ok()).toBe(true);
+async function seed(request: APIRequestContext, path: string) {
+  expect((await request.post('/api/entries', { data: { path } })).ok()).toBe(true);
 }
 const row = (page: Page, path: string) => page.locator(`[data-entry-path="${path}"]`);
 const explorer = (page: Page) => page.getByRole('complementary', { name: 'Canvas explorer' });
@@ -64,7 +64,7 @@ test('bulk move, undo, custom order and duplicate retain the active drawing', as
 }) => {
   for (const path of ['Batch A.excalidraw', 'Batch B.excalidraw', 'Batch C.excalidraw'])
     await seed(request, path);
-  await seed(request, 'Batch destination', 'folder');
+  await seed(request, 'Batch destination.excalidraw');
   await page.goto('/?canvas=Batch%20A.excalidraw');
   await ready(page);
   const canvas = await page.locator('.excalidraw canvas.interactive').elementHandle();
@@ -119,11 +119,11 @@ test('bulk move, undo, custom order and duplicate retain the active drawing', as
   await expect(page.locator('dialog')).toHaveCount(0);
 });
 
-test('pointer drag moves into a folder and inserts in custom order; undo restores the prior order', async ({
+test('pointer drag moves into a canvas and inserts in custom order; undo restores the prior order', async ({
   page,
   request,
 }) => {
-  await seed(request, 'Drag destination', 'folder');
+  await seed(request, 'Drag destination.excalidraw');
   await seed(request, 'Drag destination/Anchor.excalidraw');
   for (const path of ['Drag A.excalidraw', 'Drag B.excalidraw']) await seed(request, path);
   await page.goto('/?canvas=Drag%20A.excalidraw');
@@ -164,7 +164,7 @@ test('pointer drag moves into a folder and inserts in custom order; undo restore
         .map((e) => e.path),
     )
     .toEqual(initial);
-  await drag('Drag A.excalidraw', 'Drag destination', 0.5);
+  await drag('Drag A.excalidraw', 'Drag destination.excalidraw', 0.5);
   await expect
     .poll(async () =>
       (await entries(request)).some((e) => e.path === 'Drag destination/Drag A.excalidraw'),
@@ -182,7 +182,7 @@ test('pointer drag moves into a folder and inserts in custom order; undo restore
         .map((e) => e.path),
     )
     .toEqual(initial);
-  // Cross-folder insertion is also one gesture and one Undo, including the source order.
+  // Insertion inside another canvas is also one gesture and one Undo, including the source order.
   await drag('Drag B.excalidraw', 'Drag destination/Anchor.excalidraw', 0.1);
   await expect
     .poll(async () => {
@@ -215,7 +215,7 @@ test('a slow unrelated rename leaves drawing available and queued canvas selecti
 }) => {
   await seed(request, 'Queue drawing.excalidraw');
   await seed(request, 'Queue next.excalidraw');
-  await seed(request, 'Queue folder', 'folder');
+  await seed(request, 'Queue parent.excalidraw');
   await page.goto('/?canvas=Queue%20drawing.excalidraw');
   await ready(page);
   const canvas = await page.locator('.excalidraw canvas.interactive').elementHandle();
@@ -232,9 +232,9 @@ test('a slow unrelated rename leaves drawing available and queued canvas selecti
     await gate;
     await route.continue();
   });
-  await row(page, 'Queue folder').focus();
+  await row(page, 'Queue parent.excalidraw').focus();
   await page.keyboard.press('F2');
-  const name = page.getByRole('textbox', { name: 'Folder name', exact: true });
+  const name = page.getByRole('textbox', { name: 'Canvas name', exact: true });
   await name.fill('Queue renamed');
   await name.press('Enter');
   await began;
@@ -246,7 +246,7 @@ test('a slow unrelated rename leaves drawing available and queued canvas selecti
     release();
   }
   await expect(page.getByRole('heading', { name: 'Queue next', exact: true })).toBeVisible();
-  await expect(row(page, 'Queue renamed')).toBeVisible();
+  await expect(row(page, 'Queue renamed.excalidraw')).toBeVisible();
 });
 
 test('touch drawer retains context through rotation and external updates, with accessible local menus', async ({
@@ -322,11 +322,11 @@ test('crossing the drawer breakpoint preserves a move picker and browser Back sk
     'Navigation C.excalidraw',
   ])
     await seed(request, path);
-  await seed(request, 'Navigation folder', 'folder');
+  await seed(request, 'Navigation parent.excalidraw');
   await page.goto('/?canvas=Navigation%20A.excalidraw');
   await ready(page);
   await action(page, 'Navigation A.excalidraw', 'Move to…');
-  const picker = page.getByRole('dialog', { name: 'Move to folder' });
+  const picker = page.getByRole('dialog', { name: 'Move to canvas' });
   await expect(picker).toBeVisible();
   await page.setViewportSize({ width: 768, height: 1024 });
   await expect(picker).toBeVisible();
@@ -393,27 +393,31 @@ test('canvas navigation skips trashed visits and disables directions with no ava
   await expect(previous).toBeDisabled();
 });
 
-test('folder arrow expands and collapses when clicking the chevron itself', async ({
+test('the chevron of a canvas with canvases inside expands and collapses it', async ({
   page,
   request,
 }) => {
-  await seed(request, 'Arrow folder', 'folder');
-  await seed(request, 'Arrow folder/Child.excalidraw');
+  await seed(request, 'Arrow parent.excalidraw');
+  await seed(request, 'Arrow parent/Child.excalidraw');
   await page.goto('/');
-  const folder = row(page, 'Arrow folder');
-  const child = row(page, 'Arrow folder/Child.excalidraw');
-  await expect(folder).toHaveAttribute('aria-expanded', 'true');
-  await folder.locator('.row-twisty svg').click();
-  await expect(folder).toHaveAttribute('aria-expanded', 'false');
+  const parent = row(page, 'Arrow parent.excalidraw');
+  const child = row(page, 'Arrow parent/Child.excalidraw');
+  // Only canvases with canvases inside have a chevron and a count.
+  await expect(child).not.toHaveAttribute('aria-expanded');
+  await expect(child.locator('.row-twisty svg')).toHaveCount(0);
+  await expect(parent.locator('.row-count')).toHaveText('1');
+  await expect(parent).toHaveAttribute('aria-expanded', 'true');
+  await parent.locator('.row-twisty svg').click();
+  await expect(parent).toHaveAttribute('aria-expanded', 'false');
   await expect(child).toHaveCount(0);
-  await folder.locator('.row-twisty svg').click();
-  await expect(folder).toHaveAttribute('aria-expanded', 'true');
+  await parent.locator('.row-twisty svg').click();
+  await expect(parent).toHaveAttribute('aria-expanded', 'true');
   await expect(child).toBeVisible();
-  await folder.locator('.row-twisty').click({ position: { x: 1, y: 1 } });
+  await parent.locator('.row-twisty').click({ position: { x: 1, y: 1 } });
   await expect(child).toHaveCount(0);
-  await folder.locator('.row-twisty svg').click();
+  await parent.locator('.row-twisty svg').click();
   await expect(child).toBeVisible();
-  await page.screenshot({ path: 'test-results/folder-arrow-expanded.png' });
+  await page.screenshot({ path: 'test-results/parent-arrow-expanded.png' });
 });
 
 test('sidebar controls: one creation control, footer views with a way back, selection in place', async ({
@@ -429,10 +433,7 @@ test('sidebar controls: one creation control, footer views with a way back, sele
   const more = side.getByRole('button', { name: 'More ways to create', exact: true });
   await more.click();
   const create = page.getByRole('menu', { name: 'More ways to create', exact: true });
-  await expect(create.getByRole('menuitem')).toHaveText([
-    'New folder',
-    'Import .excalidraw files…',
-  ]);
+  await expect(create.getByRole('menuitem')).toHaveText(['Import .excalidraw files…']);
   await page.keyboard.press('Escape');
   await expect(create).toHaveCount(0);
   await expect(more).toBeFocused();

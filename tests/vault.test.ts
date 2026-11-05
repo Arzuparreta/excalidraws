@@ -4,7 +4,8 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { Vault, VaultError } from '../server/vault.js';
+import { EMPTY_REVISION, Vault, VaultError } from '../server/vault.js';
+import { canvasLink } from '../shared/canvas.js';
 import { createApp } from '../server/app.js';
 import { emptyScene, type Entry } from '../shared/model.js';
 
@@ -19,7 +20,7 @@ const conflict = (e: unknown) => e instanceof VaultError && e.code === 'conflict
 
 test('round trip preserves images, viewport and unknown scene fields as real JSON', async (t) => {
   const { vault, root } = await fixture(t);
-  await vault.create('Ideas', 'folder');
+  await vault.create('Ideas.excalidraw');
   const scene = {
     ...emptyScene(),
     appState: { scrollX: 52, scrollY: -70, zoom: { value: 1.5 } },
@@ -33,7 +34,7 @@ test('round trip preserves images, viewport and unknown scene fields as real JSO
     },
     futureField: { preserve: true },
   };
-  const created = (await vault.create('Ideas/🌳 Tree.excalidraw', 'file', scene))!;
+  const created = (await vault.create('Ideas/🌳 Tree.excalidraw', scene))!;
   assert.deepEqual((await vault.read(created.path)).scene, scene);
   const saved = await vault.save(created.path, created.revision, {
     ...scene,
@@ -55,7 +56,7 @@ test('round trip preserves images, viewport and unknown scene fields as real JSO
 
 test('concurrent writers cannot overwrite the winner; external edits and deletion conflict', async (t) => {
   const { vault, root } = await fixture(t);
-  const doc = (await vault.create('Shared.excalidraw', 'file'))!;
+  const doc = (await vault.create('Shared.excalidraw'))!;
   const results = await Promise.allSettled([
     vault.save(doc.path, doc.revision, { ...emptyScene(), elements: [{ id: 'one' }] }),
     vault.save(doc.path, doc.revision, { ...emptyScene(), elements: [{ id: 'two' }] }),
@@ -72,24 +73,149 @@ test('concurrent writers cannot overwrite the winner; external edits and deletio
   await assert.rejects(vault.save(doc.path, current.revision, emptyScene()), conflict);
 });
 
-test('folders, rename, move, trash and restoration preserve content and reject collisions', async (t) => {
-  const { vault } = await fixture(t);
-  await vault.create('Project', 'folder');
-  await vault.create('Other', 'folder');
-  await vault.create('Project/Plan.excalidraw', 'file');
+test('nested canvases move, trash and restore with their contents and reject collisions', async (t) => {
+  const { vault, root } = await fixture(t);
+  await vault.create('Project.excalidraw');
+  await vault.create('Other.excalidraw');
+  await vault.create('Project/Plan.excalidraw');
+  assert.ok((await fs.stat(path.join(root, 'Project'))).isDirectory());
   await vault.move('Project/Plan.excalidraw', 'Other/Roadmap.excalidraw');
-  await assert.rejects(vault.move('Other', 'Other/inside'), /inside/);
-  const trash = await vault.trash('Other');
-  assert.equal(
-    (await vault.list()).some((e) => e.path.startsWith('Other')),
-    false,
+  // The content folder exists only while its canvas contains canvases.
+  await assert.rejects(fs.stat(path.join(root, 'Project')), /ENOENT/);
+  await assert.rejects(
+    vault.move('Other.excalidraw', 'Other/Roadmap/Inside.excalidraw'),
+    /inside itself/,
   );
-  assert.equal((await vault.listTrash()).length, 1);
-  await vault.create('Other', 'folder');
-  await assert.rejects(vault.restore(trash.id, 'Other'), /exists/);
-  await vault.restore(trash.id, 'Recovered');
+  const trash = await vault.trash('Other.excalidraw');
+  assert.deepEqual(
+    (await vault.list()).map((e) => e.path),
+    ['Project.excalidraw'],
+  );
+  assert.deepEqual(
+    (await vault.listTrash()).map(({ path, inside }) => ({ path, inside })),
+    [{ path: 'Other.excalidraw', inside: 1 }],
+  );
+  await vault.create('Other.excalidraw');
+  await assert.rejects(vault.restore(trash.id, 'Other.excalidraw'), /exists/);
+  await vault.restore(trash.id, 'Recovered.excalidraw');
   assert.equal((await vault.read('Recovered/Roadmap.excalidraw')).scene.type, 'excalidraw');
+  assert.equal((await byPath(vault))['Recovered.excalidraw'].children, 1);
   assert.equal((await vault.listTrash()).length, 0);
+});
+
+test('a canvas keeps the canvases inside it in a folder with the same name', async (t) => {
+  const { vault, root } = await fixture(t);
+  const missing = (e: unknown) => e instanceof VaultError && e.status === 404;
+  await vault.create('Ideas.excalidraw');
+  await assert.rejects(vault.create('Missing/Child.excalidraw'), missing);
+  await vault.create('Ideas/Idea A.excalidraw');
+  await vault.create('Ideas/Idea B.excalidraw');
+  await vault.create('Ideas/Idea B/Detail.excalidraw');
+  let entries = await byPath(vault);
+  assert.deepEqual(Object.keys(entries).sort(), [
+    'Ideas.excalidraw',
+    'Ideas/Idea A.excalidraw',
+    'Ideas/Idea B.excalidraw',
+    'Ideas/Idea B/Detail.excalidraw',
+  ]);
+  assert.equal(entries['Ideas.excalidraw'].children, 2);
+  assert.equal(entries['Ideas/Idea B.excalidraw'].children, 1);
+  assert.equal(entries['Ideas/Idea A.excalidraw'].children, 0);
+  // A name is taken by the canvas file and by its content folder.
+  await assert.rejects(vault.create('Ideas/Idea B.excalidraw'), /exists/);
+  await fs.mkdir(path.join(root, 'Loose'));
+  entries = await byPath(vault);
+  assert.equal(entries['Loose.excalidraw'].unsaved, true);
+  assert.equal(entries['Loose.excalidraw'].children, 0);
+  await assert.rejects(vault.create('Loose.excalidraw'), /exists/);
+
+  // A canvas without a file opens empty; its first save writes the file.
+  const loose = await vault.read('Loose.excalidraw');
+  assert.equal(loose.revision, EMPTY_REVISION);
+  assert.deepEqual(loose.scene, emptyScene());
+  assert.equal(await vault.revision('Loose.excalidraw'), EMPTY_REVISION);
+  await assert.rejects(vault.save('Loose.excalidraw', 'stale', emptyScene()), conflict);
+  const saved = await vault.save('Loose.excalidraw', loose.revision, {
+    ...emptyScene(),
+    elements: [{ id: 'first' }],
+  });
+  assert.equal(saved.revision, await vault.revision('Loose.excalidraw'));
+  assert.ok((await fs.stat(path.join(root, 'Loose.excalidraw'))).isFile());
+  assert.equal((await byPath(vault))['Loose.excalidraw'].unsaved, undefined);
+
+  // Moving the last canvas out removes the empty folder, unless it is the canvas itself.
+  await vault.move('Ideas/Idea B/Detail.excalidraw', 'Loose/Detail.excalidraw');
+  await assert.rejects(fs.stat(path.join(root, 'Ideas/Idea B')), /ENOENT/);
+  assert.equal((await byPath(vault))['Loose.excalidraw'].children, 1);
+  await fs.mkdir(path.join(root, 'Box'));
+  await vault.create('Box/Only.excalidraw');
+  await vault.trash('Box/Only.excalidraw');
+  assert.ok((await fs.stat(path.join(root, 'Box'))).isDirectory());
+  assert.equal((await byPath(vault))['Box.excalidraw'].unsaved, true);
+
+  // Moving or trashing a canvas without a file carries its folder.
+  await vault.create('Box/Inner.excalidraw');
+  await vault.move('Box.excalidraw', 'Ideas/Box.excalidraw');
+  entries = await byPath(vault);
+  assert.equal(entries['Ideas/Box.excalidraw'].unsaved, true);
+  assert.ok(entries['Ideas/Box/Inner.excalidraw']);
+  const box = await vault.trash('Ideas/Box.excalidraw');
+  assert.equal(box.inside, 1);
+  assert.equal(await vault.restore(box.id), 'Ideas/Box.excalidraw');
+  assert.ok((await byPath(vault))['Ideas/Box/Inner.excalidraw']);
+});
+
+test('moving a canvas rewrites the links that point into it', async (t) => {
+  const { vault } = await fixture(t);
+  const element = (id: string, link: string | null) => ({ id, type: 'text', version: 3, link });
+  await vault.create('Ideas.excalidraw', {
+    ...emptyScene(),
+    elements: [
+      element('a', canvasLink('Ideas/Idea A.excalidraw')),
+      element('b', 'https://example.com/?canvas=Ideas/Idea%20A.excalidraw'),
+      element('c', canvasLink('Ideas/Idea A/Deep.excalidraw')),
+      element('d', canvasLink('Ideas/Idea AB.excalidraw')),
+      element('e', null),
+    ],
+  });
+  await vault.create('Ideas/Idea A.excalidraw');
+  await vault.create('Ideas/Idea A/Deep.excalidraw');
+  await vault.create('Index.excalidraw', {
+    ...emptyScene(),
+    elements: [element('x', canvasLink('Ideas/Idea A.excalidraw'))],
+  });
+  await vault.create('Plain.excalidraw');
+  const before = await vault.read('Ideas.excalidraw');
+  const plain = await vault.read('Plain.excalidraw');
+  const result = await vault.move(
+    'Ideas/Idea A.excalidraw',
+    'Ideas/Renamed.excalidraw',
+    'Index.excalidraw',
+  );
+  assert.deepEqual(result.rewritten, ['Ideas.excalidraw']);
+  const elements = (await vault.read('Ideas.excalidraw')).scene.elements;
+  assert.deepEqual(
+    elements.map((item) => item.link),
+    [
+      canvasLink('Ideas/Renamed.excalidraw'),
+      'https://example.com/?canvas=Ideas/Idea%20A.excalidraw',
+      canvasLink('Ideas/Renamed/Deep.excalidraw'),
+      canvasLink('Ideas/Idea AB.excalidraw'),
+      null,
+    ],
+  );
+  assert.deepEqual(
+    elements.map((item) => item.version),
+    [4, 3, 4, 3, 3],
+  );
+  // The previous scene is kept as a version; excluded and unrelated canvases are untouched.
+  assert.equal((await vault.history('Ideas.excalidraw'))[0].revision, before.revision);
+  assert.equal(
+    (await vault.read('Index.excalidraw')).scene.elements[0].link,
+    canvasLink('Ideas/Idea A.excalidraw'),
+  );
+  assert.equal((await vault.read('Plain.excalidraw')).revision, plain.revision);
+  assert.equal(canvasLink('A+B & C#1/D.excalidraw'), '/?canvas=A%2BB%20%26%20C%231/D.excalidraw');
 });
 
 test('traversal, absolute/hidden paths, symlinks and non-scenes are refused', async (t) => {
@@ -103,16 +229,16 @@ test('traversal, absolute/hidden paths, symlinks and non-scenes are refused', as
     'a//b.excalidraw',
     ' .excalidraw',
   ]) {
-    await assert.rejects(vault.create(name, 'file'), VaultError);
+    await assert.rejects(vault.create(name), VaultError);
   }
   const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'outside-'));
   t.after(() => fs.rm(outside, { recursive: true, force: true }));
   await fs.symlink(outside, path.join(root, 'Link'));
-  await assert.rejects(vault.create('Link/escape.excalidraw', 'file'), /Symbolic links/);
+  await assert.rejects(vault.create('Link/escape.excalidraw'), /Symbolic links/);
   await fs.writeFile(path.join(root, 'invalid.excalidraw'), '{}');
   await assert.rejects(vault.read('invalid.excalidraw'), /valid/);
   assert.equal(
-    (await vault.list()).some((e) => e.path === 'Link'),
+    (await vault.list()).some((e) => e.path === 'Link.excalidraw'),
     false,
   );
 });
@@ -122,7 +248,7 @@ test('retains only 20 previous revisions and locks out a second service', async 
   const unlock = await vault.lock();
   t.after(unlock);
   await assert.rejects(new Vault(root).lock(), /already open/);
-  let doc = (await vault.create('History.excalidraw', 'file'))!;
+  let doc = (await vault.create('History.excalidraw'))!;
   for (let n = 0; n < 23; n++)
     doc = await vault.save(doc.path, doc.revision, {
       ...emptyScene(),
@@ -145,18 +271,12 @@ test('HTTP contract rejects cross-origin writes, malformed JSON, traversal and s
       body: JSON.stringify(body),
     });
   assert.equal(
-    (
-      await post(
-        '/entries',
-        { path: 'X.excalidraw', kind: 'file' },
-        { Origin: 'https://evil.test' },
-      )
-    ).status,
+    (await post('/entries', { path: 'X.excalidraw' }, { Origin: 'https://evil.test' })).status,
     403,
   );
-  assert.equal((await post('/entries', { path: '../X.excalidraw', kind: 'file' })).status, 400);
-  assert.equal((await post('/entries', { path: 'X.excalidraw', kind: 'file' })).status, 201);
-  assert.equal((await post('/entries', { path: 'X.excalidraw', kind: 'file' })).status, 409);
+  assert.equal((await post('/entries', { path: '../X.excalidraw' })).status, 400);
+  assert.equal((await post('/entries', { path: 'X.excalidraw' })).status, 201);
+  assert.equal((await post('/entries', { path: 'X.excalidraw' })).status, 409);
   const response = await fetch(`${url}/api/document`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -207,26 +327,26 @@ const snapshotFile = async (file: string) => {
 
 test('favorites, inherited archive and custom order persist without touching scenes', async (t) => {
   const { vault, root } = await fixture(t);
-  await vault.create('Projects', 'folder');
-  await vault.create('Projects/Alpha.excalidraw', 'file');
-  await vault.create('Projects/Beta.excalidraw', 'file');
-  await vault.create('Projects/Gamma.excalidraw', 'file');
-  await vault.create('Projects/Old', 'folder');
-  await vault.create('Projects/Old/Legacy.excalidraw', 'file');
+  await vault.create('Projects.excalidraw');
+  await vault.create('Projects/Alpha.excalidraw');
+  await vault.create('Projects/Beta.excalidraw');
+  await vault.create('Projects/Gamma.excalidraw');
+  await vault.create('Projects/Old.excalidraw');
+  await vault.create('Projects/Old/Legacy.excalidraw');
   const before = await snapshotFile(path.join(root, 'Projects/Alpha.excalidraw'));
 
-  await vault.setLibrary(['Projects/Alpha.excalidraw', 'Projects'], 'favorite', true);
-  await vault.setLibrary(['Projects/Old'], 'archived', true);
+  await vault.setLibrary(['Projects/Alpha.excalidraw', 'Projects.excalidraw'], 'favorite', true);
+  await vault.setLibrary(['Projects/Old.excalidraw'], 'archived', true);
   await vault.setLibrary(['Projects/Old/Legacy.excalidraw'], 'archived', true);
   await vault.order('Projects', ['Projects/Gamma.excalidraw', 'Projects/Alpha.excalidraw']);
 
   // A restarted service reads the same metadata.
   const entries = await byPath(new Vault(root));
   assert.equal(entries['Projects/Alpha.excalidraw'].favorite, true);
-  assert.equal(entries['Projects'].favorite, true);
+  assert.equal(entries['Projects.excalidraw'].favorite, true);
   assert.equal(entries['Projects/Beta.excalidraw'].favorite, false);
-  assert.equal(entries['Projects/Old'].archived, true);
-  assert.equal(entries['Projects/Old'].archiveRoot, 'Projects/Old');
+  assert.equal(entries['Projects/Old.excalidraw'].archived, true);
+  assert.equal(entries['Projects/Old.excalidraw'].archiveRoot, 'Projects/Old.excalidraw');
   assert.equal(
     entries['Projects/Old/Legacy.excalidraw'].archiveRoot,
     'Projects/Old/Legacy.excalidraw',
@@ -234,53 +354,80 @@ test('favorites, inherited archive and custom order persist without touching sce
   assert.equal(entries['Projects/Alpha.excalidraw'].archived, false);
   assert.equal(entries['Projects/Alpha.excalidraw'].archiveRoot, undefined);
   assert.deepEqual(
-    ['Gamma', 'Alpha', 'Beta', 'Old'].map((name) => {
-      const key = name === 'Old' ? 'Projects/Old' : `Projects/${name}.excalidraw`;
-      return entries[key].order;
-    }),
+    ['Gamma', 'Alpha', 'Beta', 'Old'].map((name) => entries[`Projects/${name}.excalidraw`].order),
     [0, 1, 2, 3],
   );
   assert.deepEqual(await snapshotFile(path.join(root, 'Projects/Alpha.excalidraw')), before);
 
   // Clearing the explicit nested flag leaves the inherited archive state.
   await vault.setLibrary(['Projects/Old/Legacy.excalidraw'], 'archived', false);
-  assert.equal((await byPath(vault))['Projects/Old/Legacy.excalidraw'].archiveRoot, 'Projects/Old');
-  await vault.setLibrary(['Projects/Old'], 'archived', false);
+  assert.equal(
+    (await byPath(vault))['Projects/Old/Legacy.excalidraw'].archiveRoot,
+    'Projects/Old.excalidraw',
+  );
+  await vault.setLibrary(['Projects/Old.excalidraw'], 'archived', false);
   assert.equal((await byPath(vault))['Projects/Old/Legacy.excalidraw'].archived, false);
   await vault.order('Projects', []);
   assert.equal((await byPath(vault))['Projects/Alpha.excalidraw'].order, 0);
 });
 
-test('metadata operations validate paths, siblings, duplicates and self-ordering', async (t) => {
+test('metadata recorded for folders by earlier versions applies to their canvases', async (t) => {
+  const { vault, root } = await fixture(t);
+  await vault.create('Ideas.excalidraw');
+  await vault.create('Ideas/Old.excalidraw');
+  await vault.create('Top.excalidraw');
+  await fs.writeFile(
+    path.join(root, '.workspace/library.json'),
+    JSON.stringify({
+      version: 1,
+      favorites: ['Ideas'],
+      archived: ['Ideas/Old'],
+      order: { '': ['Top.excalidraw', 'Ideas'] },
+    }),
+  );
+  const entries = await byPath(vault);
+  assert.equal(entries['Ideas.excalidraw'].favorite, true);
+  assert.equal(entries['Ideas/Old.excalidraw'].archiveRoot, 'Ideas/Old.excalidraw');
+  assert.equal(entries['Top.excalidraw'].order, 0);
+  assert.equal(entries['Ideas.excalidraw'].order, 1);
+});
+
+test('metadata operations validate paths, siblings and duplicates', async (t) => {
   const { vault } = await fixture(t);
-  await vault.create('A', 'folder');
-  await vault.create('A/B', 'folder');
-  await vault.create('A/one.excalidraw', 'file');
-  await vault.create('top.excalidraw', 'file');
+  await vault.create('A.excalidraw');
+  await vault.create('A/B.excalidraw');
+  await vault.create('A/one.excalidraw');
+  await vault.create('top.excalidraw');
   const invalid = (e: unknown) => e instanceof VaultError && e.status === 400;
   const missing = (e: unknown) => e instanceof VaultError && e.status === 404;
   await assert.rejects(vault.order('A', ['top.excalidraw']), invalid);
   await assert.rejects(vault.order('A', ['A/one.excalidraw', 'A/one.excalidraw']), invalid);
-  await assert.rejects(vault.order('A/B', ['A']), invalid);
-  await assert.rejects(vault.order('A', ['A']), invalid);
+  await assert.rejects(vault.order('A/B', ['A.excalidraw']), invalid);
+  await assert.rejects(vault.order('A', ['A.excalidraw']), invalid);
+  await assert.rejects(vault.order('A', ['A/B']), invalid);
   await assert.rejects(vault.order('A', ['A/missing.excalidraw']), missing);
-  await assert.rejects(vault.order('top.excalidraw', []), invalid);
-  await assert.rejects(vault.order('Missing', []), missing);
+  await assert.rejects(vault.order('Missing', ['Missing/x.excalidraw']), missing);
   await assert.rejects(vault.order('', ['../x.excalidraw']), invalid);
-  await assert.rejects(vault.setLibrary(['A', 'A'], 'favorite', true), invalid);
+  await assert.rejects(
+    vault.setLibrary(['A.excalidraw', 'A.excalidraw'], 'favorite', true),
+    invalid,
+  );
   await assert.rejects(vault.setLibrary([], 'favorite', true), invalid);
   await assert.rejects(vault.setLibrary(['.workspace'], 'archived', true), invalid);
+  await assert.rejects(vault.setLibrary(['A'], 'archived', true), invalid);
   await assert.rejects(vault.setLibrary(['Nothing.excalidraw'], 'favorite', true), missing);
   await vault.setLibrary(['Nothing.excalidraw'], 'favorite', false);
-  await vault.order('', ['top.excalidraw', 'A']);
+  // Clearing the order of a canvas that no longer contains canvases is not an error.
+  await vault.order('Missing', []);
+  await vault.order('', ['top.excalidraw', 'A.excalidraw']);
   const entries = await byPath(vault);
   assert.equal(entries['top.excalidraw'].order, 0);
-  assert.equal(entries['A'].order, 1);
+  assert.equal(entries['A.excalidraw'].order, 1);
 });
 
 test('invalid metadata is preserved for diagnosis and replaced on the next change', async (t) => {
   const { vault, root } = await fixture(t);
-  await vault.create('Plan.excalidraw', 'file');
+  await vault.create('Plan.excalidraw');
   const file = path.join(root, '.workspace/library.json');
   await fs.writeFile(file, '{"version": 1, "favorites": "broken"');
   assert.equal((await byPath(vault))['Plan.excalidraw'].favorite, false);
@@ -299,33 +446,42 @@ test('invalid metadata is preserved for diagnosis and replaced on the next chang
   );
 });
 
-test('moves rewrite metadata and history follows files and folders', async (t) => {
+test('moves rewrite metadata and history follows canvases and their contents', async (t) => {
   const { vault, root } = await fixture(t);
-  await vault.create('Work', 'folder');
-  await vault.create('Work/Inner', 'folder');
-  await vault.create('Done', 'folder');
-  let doc = (await vault.create('Work/Inner/Plan.excalidraw', 'file'))!;
+  await vault.create('Work.excalidraw');
+  let inner = await vault.create('Work/Inner.excalidraw');
+  inner = await vault.save(inner.path, inner.revision, {
+    ...emptyScene(),
+    elements: [{ id: 'inner' }],
+  });
+  await vault.create('Done.excalidraw');
+  let doc = await vault.create('Work/Inner/Plan.excalidraw');
   const first = doc.revision;
   doc = await vault.save(doc.path, doc.revision, { ...emptyScene(), elements: [{ id: 'a' }] });
-  await vault.create('Work/Second.excalidraw', 'file');
+  await vault.create('Work/Second.excalidraw');
   await vault.setLibrary(['Work/Inner/Plan.excalidraw'], 'favorite', true);
-  await vault.setLibrary(['Work/Inner'], 'archived', true);
-  await vault.order('Work', ['Work/Second.excalidraw', 'Work/Inner']);
+  await vault.setLibrary(['Work/Inner.excalidraw'], 'archived', true);
+  await vault.order('Work', ['Work/Second.excalidraw', 'Work/Inner.excalidraw']);
   await vault.order('Work/Inner', ['Work/Inner/Plan.excalidraw']);
 
   // Rename keeps the position in the custom order.
-  await vault.move('Work/Inner', 'Work/Nested');
+  await vault.move('Work/Inner.excalidraw', 'Work/Nested.excalidraw');
   let entries = await byPath(vault);
-  assert.equal(entries['Work/Nested'].order, 1);
+  assert.equal(entries['Work/Nested.excalidraw'].order, 1);
+  assert.equal(entries['Work/Nested.excalidraw'].children, 1);
   assert.equal(entries['Work/Nested/Plan.excalidraw'].favorite, true);
-  assert.equal(entries['Work/Nested/Plan.excalidraw'].archiveRoot, 'Work/Nested');
+  assert.equal(entries['Work/Nested/Plan.excalidraw'].archiveRoot, 'Work/Nested.excalidraw');
   assert.deepEqual(
     (await vault.history('Work/Nested/Plan.excalidraw')).map((h) => h.revision),
     [first],
   );
+  assert.equal((await vault.history('Work/Nested.excalidraw')).length, 1);
+  const library = () =>
+    fs.readFile(path.join(root, '.workspace/library.json'), 'utf8').then(JSON.parse);
+  assert.deepEqual((await library()).order['Work/Nested'], ['Work/Nested/Plan.excalidraw']);
 
-  // Moving an ancestor folder carries the descendant history along.
-  await vault.move('Work', 'Done/Work');
+  // Moving an ancestor carries the history of the canvases inside it along.
+  await vault.move('Work.excalidraw', 'Done/Work.excalidraw');
   entries = await byPath(vault);
   assert.equal(entries['Done/Work/Nested/Plan.excalidraw'].favorite, true);
   assert.equal(entries['Done/Work/Second.excalidraw'].order, 0);
@@ -336,10 +492,9 @@ test('moves rewrite metadata and history follows files and folders', async (t) =
   assert.equal((await vault.history('Work/Nested/Plan.excalidraw')).length, 0);
   assert.deepEqual(await vault.historical('Done/Work/Nested/Plan.excalidraw', first), emptyScene());
 
-  // Moving a file out of a folder removes it from the old parent's custom order.
+  // Moving a canvas out removes it from the old parent's custom order.
   await vault.move('Done/Work/Second.excalidraw', 'Second.excalidraw');
-  const library = JSON.parse(await fs.readFile(path.join(root, '.workspace/library.json'), 'utf8'));
-  assert.deepEqual(library.order['Done/Work'], ['Done/Work/Nested']);
+  assert.deepEqual((await library()).order['Done/Work'], ['Done/Work/Nested.excalidraw']);
 
   // Existing history at the destination is merged, not dropped.
   const plan = await vault.read('Done/Work/Nested/Plan.excalidraw');
@@ -362,36 +517,39 @@ test('moves rewrite metadata and history follows files and folders', async (t) =
 
 test('trash keeps metadata and history; restore recreates parents and never overwrites', async (t) => {
   const { vault, root } = await fixture(t);
-  await vault.create('Client', 'folder');
-  await vault.create('Client/Sketches', 'folder');
-  let doc = (await vault.create('Client/Sketches/Logo.excalidraw', 'file'))!;
+  await vault.create('Client.excalidraw');
+  await vault.create('Client/Sketches.excalidraw');
+  let doc = await vault.create('Client/Sketches/Logo.excalidraw');
   const first = doc.revision;
   doc = await vault.save(doc.path, doc.revision, { ...emptyScene(), elements: [{ id: 'x' }] });
-  await vault.create('Client/Brief.excalidraw', 'file');
-  await vault.create('Client/Notes.excalidraw', 'file');
+  await vault.create('Client/Brief.excalidraw');
+  await vault.create('Client/Notes.excalidraw');
   await vault.setLibrary(['Client/Sketches/Logo.excalidraw'], 'favorite', true);
-  await vault.setLibrary(['Client/Sketches'], 'archived', true);
+  await vault.setLibrary(['Client/Sketches.excalidraw'], 'archived', true);
   await vault.order('Client', [
     'Client/Notes.excalidraw',
-    'Client/Sketches',
+    'Client/Sketches.excalidraw',
     'Client/Brief.excalidraw',
   ]);
 
-  // Undo-style restore returns the item to its original place and position.
-  const sketches = await vault.trash('Client/Sketches');
-  assert.equal(sketches.kind, 'folder');
+  // Undo-style restore returns the canvas to its original place and position.
+  const sketches = await vault.trash('Client/Sketches.excalidraw');
+  assert.equal(sketches.inside, 1);
   assert.equal((await vault.history('Client/Sketches/Logo.excalidraw')).length, 0);
   assert.equal((await byPath(vault))['Client/Brief.excalidraw'].order, 1);
-  // A new item at the trashed path does not inherit the trashed metadata.
-  await vault.create('Client/Sketches', 'folder');
-  assert.equal((await byPath(vault))['Client/Sketches'].archived, false);
-  await assert.rejects(vault.restore(sketches.id, 'Client/Sketches'), /exists/);
+  // A new canvas at the trashed path does not inherit the trashed metadata.
+  await vault.create('Client/Sketches.excalidraw');
+  assert.equal((await byPath(vault))['Client/Sketches.excalidraw'].archived, false);
+  await assert.rejects(vault.restore(sketches.id, 'Client/Sketches.excalidraw'), /exists/);
   const restored = await vault.restore(sketches.id);
-  assert.equal(restored, 'Client/Sketches (restored)');
+  assert.equal(restored, 'Client/Sketches (restored).excalidraw');
   let entries = await byPath(vault);
   assert.equal(entries['Client/Sketches (restored)/Logo.excalidraw'].favorite, true);
-  assert.equal(entries['Client/Sketches (restored)'].archiveRoot, 'Client/Sketches (restored)');
-  assert.equal(entries['Client/Sketches'].archived, false);
+  assert.equal(
+    entries['Client/Sketches (restored).excalidraw'].archiveRoot,
+    'Client/Sketches (restored).excalidraw',
+  );
+  assert.equal(entries['Client/Sketches.excalidraw'].archived, false);
   assert.deepEqual(
     (await vault.history('Client/Sketches (restored)/Logo.excalidraw')).map((h) => h.revision),
     [first],
@@ -403,18 +561,22 @@ test('trash keeps metadata and history; restore recreates parents and never over
   assert.equal(await vault.restore(notes.id), 'Client/Notes.excalidraw');
   assert.equal((await byPath(vault))['Client/Notes.excalidraw'].order, 0);
 
-  // Missing parent folders are recreated; a second collision gets a numbered name.
+  // Missing containing canvases come back without files; a second collision is numbered.
   const logo = await vault.trash('Client/Sketches (restored)/Logo.excalidraw');
-  const client = await vault.trash('Client');
+  const client = await vault.trash('Client.excalidraw');
+  assert.equal(client.inside, 4);
   assert.equal(await vault.restore(logo.id), 'Client/Sketches (restored)/Logo.excalidraw');
   entries = await byPath(vault);
   assert.equal(entries['Client/Sketches (restored)/Logo.excalidraw'].favorite, true);
-  assert.equal(entries['Client/Sketches (restored)'].archived, false);
-  assert.equal(await vault.restore(client.id), 'Client (restored)');
-  await vault.create('Twice.excalidraw', 'file');
+  assert.equal(entries['Client/Sketches (restored).excalidraw'].archived, false);
+  assert.equal(entries['Client/Sketches (restored).excalidraw'].unsaved, true);
+  assert.equal(entries['Client.excalidraw'].unsaved, true);
+  assert.equal(await vault.restore(client.id), 'Client (restored).excalidraw');
+  assert.equal((await byPath(vault))['Client (restored).excalidraw'].children, 4);
+  await vault.create('Twice.excalidraw');
   const twice = await vault.trash('Twice.excalidraw');
-  await vault.create('Twice.excalidraw', 'file');
-  await vault.create('Twice (restored).excalidraw', 'file');
+  await vault.create('Twice.excalidraw');
+  await vault.create('Twice (restored).excalidraw');
   assert.equal(await vault.restore(twice.id), 'Twice (restored 2).excalidraw');
   assert.equal(
     (await fs.readdir(path.join(root, '.workspace/trash'))).length,
@@ -447,6 +609,54 @@ test('trash records from before workspace metadata still restore', async (t) => 
   );
   assert.equal(await vault.restore(id), 'Gone/Old.excalidraw');
   assert.equal((await vault.read('Gone/Old.excalidraw')).scene.type, 'excalidraw');
+  assert.equal((await byPath(vault))['Gone.excalidraw'].unsaved, true);
+});
+
+test('a folder trashed by an earlier version comes back as a canvas', async (t) => {
+  const { vault, root } = await fixture(t);
+  const id = '00000000-0000-4000-8000-000000000001';
+  const directory = path.join(root, '.workspace/trash', id);
+  await fs.mkdir(path.join(directory, 'content/Sub'), { recursive: true });
+  await fs.writeFile(
+    path.join(directory, 'meta.json'),
+    JSON.stringify({ id, path: 'Box', kind: 'folder', deleted: new Date().toISOString() }),
+  );
+  await fs.writeFile(
+    path.join(directory, 'content/Inside.excalidraw'),
+    JSON.stringify(emptyScene()),
+  );
+  await fs.writeFile(
+    path.join(directory, 'content/Sub/Deep.excalidraw'),
+    JSON.stringify(emptyScene()),
+  );
+  const history = path.join(
+    directory,
+    'history',
+    createHash('sha256').update('Inside.excalidraw').digest('hex'),
+  );
+  await fs.mkdir(history, { recursive: true });
+  await fs.writeFile(
+    path.join(history, `${'a'.repeat(64)}.excalidraw`),
+    JSON.stringify(emptyScene()),
+  );
+  await fs.writeFile(
+    path.join(directory, 'library.json'),
+    JSON.stringify({ version: 1, favorites: ['', 'Sub'], archived: [], order: {} }),
+  );
+  assert.deepEqual(
+    (await vault.listTrash()).map(({ path, inside }) => ({ path, inside })),
+    [{ path: 'Box.excalidraw', inside: 3 }],
+  );
+  assert.equal(await vault.restore(id), 'Box.excalidraw');
+  const entries = await byPath(vault);
+  assert.equal(entries['Box.excalidraw'].unsaved, true);
+  assert.equal(entries['Box.excalidraw'].favorite, true);
+  assert.equal(entries['Box/Sub.excalidraw'].favorite, true);
+  assert.equal(entries['Box/Sub.excalidraw'].children, 1);
+  assert.deepEqual(
+    (await vault.history('Box/Inside.excalidraw')).map((h) => h.revision),
+    ['a'.repeat(64)],
+  );
 });
 
 test('HTTP metadata operations validate input and report not found', async (t) => {
@@ -461,8 +671,8 @@ test('HTTP metadata operations validate input and report not found', async (t) =
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-  await vault.create('A.excalidraw', 'file');
-  await vault.create('B.excalidraw', 'file');
+  await vault.create('A.excalidraw');
+  await vault.create('B.excalidraw');
   assert.equal(
     (await post('/library', { property: 'favorite', paths: ['A.excalidraw'], value: true })).status,
     200,
@@ -493,38 +703,49 @@ test('HTTP metadata operations validate input and report not found', async (t) =
   );
   const trashed = await (await post('/trash', { path: 'A.excalidraw' })).json();
   assert.equal(trashed.path, 'A.excalidraw');
-  await vault.create('A.excalidraw', 'file');
+  await vault.create('A.excalidraw');
   const restored = await post('/restore', { id: trashed.id });
   assert.deepEqual(await restored.json(), { path: 'A (restored).excalidraw' });
 });
 
-test('a folder move cannot make descendants or their metadata exceed the path limit', async (t) => {
+test('a move cannot make contained canvases or their metadata exceed the path limit', async (t) => {
   const { vault } = await fixture(t);
-  const target = 'T'.repeat(180);
-  await vault.create(target, 'folder');
-  await vault.create('Tree', 'folder');
+  const target = `${'T'.repeat(169)}.excalidraw`;
+  await vault.create(target);
+  await vault.create('Tree.excalidraw');
   let folder = 'Tree';
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
+    await vault.create(`${folder}/${'L'.repeat(160)}.excalidraw`);
     folder += `/${'L'.repeat(160)}`;
-    await vault.create(folder, 'folder');
   }
   const original = `${folder}/Plan.excalidraw`;
-  const doc = (await vault.create(original, 'file'))!;
+  const doc = await vault.create(original);
   await vault.setLibrary([original], 'favorite', true);
-  await assert.rejects(vault.move('Tree', `${target}/Tree`), /Invalid name or path/);
+  await assert.rejects(
+    vault.move('Tree.excalidraw', `${'T'.repeat(169)}/Tree.excalidraw`),
+    /Invalid name or path/,
+  );
   assert.equal((await vault.read(original)).revision, doc.revision);
   assert.equal((await byPath(vault))[original].favorite, true);
+  assert.equal((await byPath(vault))[target].children, 0);
 });
 
 test('restoring into a recreated parent clears metadata left by external deletion', async (t) => {
   const { vault, root } = await fixture(t);
-  await vault.create('Old parent', 'folder');
-  await vault.create('Old parent/Plan.excalidraw', 'file');
+  await vault.create('Old parent.excalidraw');
+  await vault.create('Old parent/Plan.excalidraw');
+  await vault.create('Kept.excalidraw');
+  await vault.create('Kept/Note.excalidraw');
   const trashed = await vault.trash('Old parent/Plan.excalidraw');
-  await vault.setLibrary(['Old parent'], 'archived', true);
-  await fs.rm(path.join(root, 'Old parent'), { recursive: true });
+  const note = await vault.trash('Kept/Note.excalidraw');
+  await vault.setLibrary(['Old parent.excalidraw', 'Kept.excalidraw'], 'archived', true);
+  await fs.rm(path.join(root, 'Old parent.excalidraw'));
   assert.equal(await vault.restore(trashed.id), 'Old parent/Plan.excalidraw');
+  // A containing canvas that still exists keeps its metadata.
+  assert.equal(await vault.restore(note.id), 'Kept/Note.excalidraw');
   const all = await byPath(vault);
-  assert.equal(all['Old parent'].archived, false);
+  assert.equal(all['Old parent.excalidraw'].archived, false);
+  assert.equal(all['Old parent.excalidraw'].unsaved, true);
   assert.equal(all['Old parent/Plan.excalidraw'].archived, false);
+  assert.equal(all['Kept.excalidraw'].archived, true);
 });
