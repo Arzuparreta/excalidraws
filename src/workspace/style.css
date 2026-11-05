@@ -670,6 +670,7 @@ kbd {
 }
 .list-empty {
   padding: 14px 6px;
+  text-align: center;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
