@@ -89,9 +89,10 @@ path has been reused and recreates missing parent folders safely.
 ### Mouse, keyboard, and touch
 
 The topbar title is one rename button containing its decorative pencil. A tree
-row opens a canvas; its rename button is a sibling inside the same name area,
-never an invalid nested button. Desktop secondary actions appear on hover and
-keyboard focus. Touch uses a visible actions button and Rename in its menu.
+row opens a canvas and contains no rename button: Rename is the first item of the
+row's actions menu and F2 on a focused row. Desktop secondary actions appear on
+hover and keyboard focus in a fixed column at the row's end. Touch uses a visible
+actions button.
 
 The virtual tree has one navigation entry point, arrow navigation, Home/End,
 Enter, F2, context-menu keys, and scoped organization shortcuts. Virtualization
@@ -158,6 +159,29 @@ implemented code and desktop/mobile captures. The resulting refinements include:
 The persistent Undo notice is dismissed on deliberate document navigation; Trash
 remains available for later recovery. No expiry timer makes recovery depend on
 reading or reacting within a time limit.
+
+## Sidebar control hierarchy
+
+A review of the rendered sidebar found five unrelated button styles above the list,
+the current view named twice (its tab and the list title), icon-only views with an
+unrecognizable Library icon, an import arrow that read as upload or export, a sort
+icon that read as filters, and visit-history arrows in the sidebar that acted on the
+editor. Row rename pencils followed each name's length, and selection mode moved every
+name to the right. The controls now follow one order, from most to least frequent:
+
+- Creation is one split control: New canvas, plus a menu with New folder and
+  Import. A folder's `+` opens the same kind of menu for that folder.
+- Library and Favorites are a labeled two-option switch. Archive and Trash are labeled
+  footer buttons beside an icon-only Settings button. Opening Archive or Trash shows
+  the view name with a Back to Library button in the list header.
+- The list header states what the list contains (`7 canvases`, `3 results`), shows
+  the current sort as text, and offers selection. It is the only header above the list.
+- Selection replaces the list header with the count, the actions once something is
+  selected, and Done. Checkboxes take the place of row icons, so names do not move.
+- Back and Forward for opened canvases sit in the topbar before the breadcrumb.
+  Viewports under 360 px hide them and rely on the browser's own navigation.
+- Touch actions buttons are dimmed except on the current or selected row, keeping a
+  contrast of at least 3:1.
 
 ## Acceptance
 

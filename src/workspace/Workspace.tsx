@@ -15,11 +15,12 @@ import {
   ArchiveRestore,
   ArrowDown,
   ArrowDownToLine,
+  ArrowDownUp,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ArrowUpFromLine,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   Copy,
@@ -31,7 +32,7 @@ import {
   FolderInput,
   FolderPlus,
   History,
-  Library,
+  Import,
   ListChecks,
   LocateFixed,
   PanelLeft,
@@ -40,7 +41,6 @@ import {
   RotateCcw,
   Search,
   Settings,
-  SlidersHorizontal,
   Star,
   StarOff,
   Trash2,
@@ -88,17 +88,22 @@ const statusLabels = {
   offline: 'Not saved',
   conflict: 'Conflict',
 } as const;
-const sortOptions: { value: SortMode; label: string }[] = [
-  { value: 'recent', label: 'Recent changes' },
-  { value: 'name', label: 'Name (A–Z)' },
-  { value: 'custom', label: 'Custom order' },
+const sortOptions: { value: SortMode; label: string; short: string }[] = [
+  { value: 'recent', label: 'Recent changes', short: 'Recent' },
+  { value: 'name', label: 'Name (A–Z)', short: 'Name' },
+  { value: 'custom', label: 'Custom order', short: 'Custom' },
 ];
-const views: { id: View; label: string; icon: () => JSX.Element }[] = [
-  { id: 'library', label: 'Library', icon: () => <Library size={18} aria-hidden="true" /> },
-  { id: 'favorites', label: 'Favorites', icon: () => <Star size={18} aria-hidden="true" /> },
-  { id: 'archive', label: 'Archive', icon: () => <Archive size={18} aria-hidden="true" /> },
-  { id: 'trash', label: 'Trash', icon: () => <Trash2 size={18} aria-hidden="true" /> },
+// Library and Favorites are the everyday views; Archive and Trash sit in the footer.
+const primaryViews: { id: View; label: string }[] = [
+  { id: 'library', label: 'Library' },
+  { id: 'favorites', label: 'Favorites' },
 ];
+const secondaryViews: { id: View; label: string; icon: () => JSX.Element }[] = [
+  { id: 'archive', label: 'Archive', icon: () => <Archive size={16} aria-hidden="true" /> },
+  { id: 'trash', label: 'Trash', icon: () => <Trash2 size={16} aria-hidden="true" /> },
+];
+const viewLabel = (id: View) =>
+  [...primaryViews, ...secondaryViews].find((item) => item.id === id)?.label ?? '';
 const dateTime = (value: string) =>
   new Date(value).toLocaleString('en', {
     day: 'numeric',
@@ -629,6 +634,18 @@ export function Workspace() {
       restore: rowRestore(target),
     });
   };
+  /** The root creation menu hangs below the whole New canvas control. */
+  const openRootCreateMenu = async (trigger: HTMLElement) => {
+    if (pop()?.kind === 'create') return closePop(true);
+    if ((await commit()) === undefined || !trigger.isConnected) return;
+    setPop({
+      kind: 'create',
+      folder: '',
+      anchor: trigger.closest<HTMLElement>('.new-split') ?? trigger,
+      layer: 'sidebar',
+      restore: elementRestore(trigger),
+    });
+  };
   const openMove = (
     paths: string[],
     anchor: HTMLElement,
@@ -755,8 +772,8 @@ export function Workspace() {
                   onSelect={() => run(() => createIn('folder', props.path), false)}
                 />
                 <MenuItem
-                  icon={<ArrowUpFromLine size={15} />}
-                  label="Import here"
+                  icon={<Import size={15} />}
+                  label="Import here…"
                   onSelect={() => run(() => w.importFiles(props.path))}
                 />
               </Show>
@@ -1001,26 +1018,30 @@ export function Workspace() {
     switch (current.kind) {
       case 'row':
         return { label: 'Item actions', role: 'menu', body: <RowMenu path={current.path} /> };
-      case 'create':
+      case 'create': {
+        // The root menu lists the alternatives to the New canvas button beside it.
+        const root = !current.folder;
         return {
-          label: `New in ${folderLabel(current.folder)}`,
+          label: root ? 'More ways to create' : `New in ${folderLabel(current.folder)}`,
           role: 'menu',
           body: (
             <>
-              <p class="popover-title">{folderLabel(current.folder)}</p>
-              <MenuItem
-                icon={<FilePlus2 size={15} />}
-                label="New canvas here"
-                onSelect={() => void createIn('file', current.folder)}
-              />
+              <p class="popover-title">{root ? 'Add to Library' : folderLabel(current.folder)}</p>
+              <Show when={!root}>
+                <MenuItem
+                  icon={<FilePlus2 size={15} />}
+                  label="New canvas here"
+                  onSelect={() => void createIn('file', current.folder)}
+                />
+              </Show>
               <MenuItem
                 icon={<FolderPlus size={15} />}
-                label="New folder here"
+                label={root ? 'New folder' : 'New folder here'}
                 onSelect={() => void createIn('folder', current.folder)}
               />
               <MenuItem
-                icon={<ArrowUpFromLine size={15} />}
-                label="Import here"
+                icon={<Import size={15} />}
+                label={root ? 'Import .excalidraw files…' : 'Import here…'}
                 onSelect={() => {
                   closePop(true);
                   w.importFiles(current.folder);
@@ -1029,6 +1050,7 @@ export function Workspace() {
             </>
           ),
         };
+      }
       case 'sort':
         return {
           label: 'Sort canvases',
@@ -1120,7 +1142,7 @@ export function Workspace() {
             role={content.role}
             class={`popover-${current.kind}`}
             id={current.kind === 'settings' ? 'settings-menu' : undefined}
-            align={current.kind === 'create' || current.kind === 'settings' ? 'start' : 'end'}
+            align={current.kind === 'create' ? 'start' : 'end'}
             onDismiss={dismissPop}
           >
             {content.body}
@@ -1188,8 +1210,17 @@ export function Workspace() {
       </Show>
     </div>
   );
-  const listTitle = () =>
-    searching() ? 'Results' : (views.find((item) => item.id === view())?.label ?? '');
+  const listTitle = () => (searching() ? 'Results' : viewLabel(view()));
+  /** Archive and Trash are side trips from the everyday views and offer a way back. */
+  const secondaryView = () => (view() === 'archive' || view() === 'trash') && !searching();
+  const listNoun = () => {
+    const one = listCount() === 1;
+    if (searching()) return one ? 'result' : 'results';
+    if (view() === 'favorites') return one ? 'favorite' : 'favorites';
+    if (view() === 'trash') return one ? 'item' : 'items';
+    return one ? 'canvas' : 'canvases';
+  };
+  const sortOption = () => sortOptions.find((option) => option.value === sort())!;
   const listCount = () =>
     showTrashList()
       ? (w.trash()?.length ?? 0)
@@ -1339,30 +1370,6 @@ export function Workspace() {
             <PanelLeftClose size={18} />
           </button>
           <span class="brand">Excalidraws</span>
-          <div class="navigation-buttons">
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Previous canvas"
-              title="Previous canvas"
-              data-name-transition
-              disabled={!w.canNavigate(-1)}
-              onClick={() => void w.rename().then((saved) => saved && w.navigate(-1))}
-            >
-              <ArrowLeft size={17} />
-            </button>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Next canvas"
-              title="Next canvas"
-              data-name-transition
-              disabled={!w.canNavigate(1)}
-              onClick={() => void w.rename().then((saved) => saved && w.navigate(1))}
-            >
-              <ArrowRight size={17} />
-            </button>
-          </div>
         </div>
         <div class="sidebar-search">
           <label class="search-field">
@@ -1419,121 +1426,218 @@ export function Workspace() {
           </label>
         </div>
         <div class="explorer-actions">
-          <button
-            type="button"
-            class="new-canvas"
-            aria-label="New canvas"
-            data-name-transition
-            title="New canvas in Library"
-            onClick={() => void createIn('file', '')}
-          >
-            <FilePlus2 size={16} />
-            <span>New canvas</span>
-          </button>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label="New folder"
-            title="New folder"
-            data-name-transition
-            onClick={() => void createIn('folder', '')}
-          >
-            <FolderPlus size={17} />
-          </button>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label="Import .excalidraw"
-            title="Import .excalidraw"
-            data-name-transition
-            onClick={() => committed(() => w.importFiles())}
-          >
-            <ArrowUpFromLine size={17} />
-          </button>
+          <div class="new-split" role="group" aria-label="Create">
+            <button
+              type="button"
+              class="new-canvas"
+              aria-label="New canvas"
+              data-name-transition
+              title="New canvas in Library"
+              onClick={() => void createIn('file', '')}
+            >
+              <FilePlus2 size={16} />
+              <span>New canvas</span>
+            </button>
+            <button
+              type="button"
+              class="new-more"
+              aria-label="More ways to create"
+              title="New folder or import"
+              aria-haspopup="menu"
+              aria-expanded={pop()?.kind === 'create' && !(pop() as { folder: string }).folder}
+              data-menu-trigger
+              data-name-transition
+              onClick={(event) => void openRootCreateMenu(event.currentTarget)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  void openRootCreateMenu(event.currentTarget);
+                }
+              }}
+            >
+              <ChevronDown size={15} />
+            </button>
+          </div>
         </div>
         <div class="explorer-navigation">
-          <div
-            class="view-tabs"
-            role="tablist"
-            aria-label="Explorer views"
-            onKeyDown={(event) => {
-              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-              event.preventDefault();
-              const tabs = [
-                ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
-              ];
-              const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
-              const next =
-                event.key === 'Home'
-                  ? 0
-                  : event.key === 'End'
-                    ? tabs.length - 1
-                    : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-              tabs[next]?.focus();
-              tabs[next]?.click();
-            }}
-          >
-            <For each={views}>
+          <div class="view-switch" role="group" aria-label="Explorer views">
+            <For each={primaryViews}>
               {(item) => (
                 <button
                   type="button"
-                  role="tab"
                   id={`view-tab-${item.id}`}
                   class="view-tab"
-                  aria-label={item.label}
-                  aria-selected={view() === item.id && !searching()}
-                  aria-controls="explorer-panel"
-                  tabIndex={view() === item.id ? 0 : -1}
-                  title={item.label}
+                  aria-current={view() === item.id && !searching() ? 'true' : undefined}
                   data-name-transition
                   onClick={() => committed(() => chooseView(item.id))}
                 >
-                  {item.icon()}
+                  {item.label}
                 </button>
               )}
             </For>
           </div>
-          <div class="list-header">
-            <span class="list-title">{listTitle()}</span>
-            <span class="entry-count">{listCount()}</span>
-            <Show when={!showTrashList()}>
-              <button
-                type="button"
-                class="icon-button"
-                aria-label="Select items"
-                title="Select items"
-                aria-pressed={selecting()}
-                onClick={() => (selecting() ? clearSelection() : setSelectMode(true))}
-              >
-                <ListChecks size={16} />
-              </button>
-              <button
-                type="button"
-                class="icon-button"
-                aria-label="Sort canvases"
-                title={`Sort canvases · ${sortOptions.find((option) => option.value === sort())!.label}`}
-                aria-haspopup="menu"
-                aria-expanded={pop()?.kind === 'sort'}
-                data-menu-trigger
-                onClick={(event) => void openSort(event.currentTarget)}
-                onKeyDown={(event) => {
-                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                    event.preventDefault();
-                    void openSort(event.currentTarget);
+          <Show
+            when={selecting()}
+            fallback={
+              <div class="list-header">
+                <Show when={secondaryView()}>
+                  <button
+                    type="button"
+                    class="icon-button list-back"
+                    aria-label="Back to Library"
+                    title="Back to Library"
+                    data-name-transition
+                    onClick={() => committed(() => chooseView('library'))}
+                  >
+                    <ArrowLeft size={15} />
+                  </button>
+                  <span class="list-title">{listTitle()}</span>
+                </Show>
+                <span class="list-summary">
+                  <span class="entry-count">{listCount()}</span>
+                  <Show when={!secondaryView()}>
+                    <span class="list-noun">{listNoun()}</span>
+                  </Show>
+                </span>
+                <Show when={!showTrashList()}>
+                  <button
+                    type="button"
+                    class="sort-button"
+                    aria-label={`Sort canvases: ${sortOption().label}`}
+                    title={`Sort canvases · ${sortOption().label}`}
+                    aria-haspopup="menu"
+                    aria-expanded={pop()?.kind === 'sort'}
+                    data-menu-trigger
+                    onClick={(event) => void openSort(event.currentTarget)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        void openSort(event.currentTarget);
+                      }
+                    }}
+                  >
+                    <ArrowDownUp size={14} />
+                    <span class="sort-label">{sortOption().short}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Select items"
+                    title="Select items"
+                    onClick={() => setSelectMode(true)}
+                  >
+                    <ListChecks size={16} />
+                  </button>
+                </Show>
+              </div>
+            }
+          >
+            <div class="list-header bulk-bar" role="group" aria-label="Selection actions">
+              <span class="bulk-count">
+                {selected().size ? `${selected().size} selected` : 'Nothing selected'}
+              </span>
+              <Show when={selected().size}>
+                <button
+                  type="button"
+                  class="icon-button"
+                  aria-label="Move selected"
+                  title="Move selected"
+                  disabled={!selected().size}
+                  data-name-transition
+                  onClick={(event) => {
+                    const anchor = event.currentTarget;
+                    committed(() =>
+                      openMove([...selected()], anchor, 'sidebar', elementRestore(anchor)),
+                    );
+                  }}
+                >
+                  <FolderInput size={17} />
+                </button>
+                <button
+                  type="button"
+                  class="icon-button"
+                  aria-label={
+                    selectedItems().length && selectedItems().every((item) => item.favorite)
+                      ? 'Remove selected from favorites'
+                      : 'Add selected to favorites'
                   }
-                }}
-              >
-                <SlidersHorizontal size={15} />
+                  title={
+                    selectedItems().length && selectedItems().every((item) => item.favorite)
+                      ? 'Remove selected from favorites'
+                      : 'Add selected to favorites'
+                  }
+                  disabled={!selected().size}
+                  data-name-transition
+                  onClick={() =>
+                    committed(() =>
+                      favoriteItems(
+                        [...selected()],
+                        !selectedItems().every((item) => item.favorite),
+                      ),
+                    )
+                  }
+                >
+                  <Show
+                    when={selectedItems().length && selectedItems().every((item) => item.favorite)}
+                    fallback={<Star size={17} />}
+                  >
+                    <StarOff size={17} />
+                  </Show>
+                </button>
+                <button
+                  type="button"
+                  class="icon-button"
+                  aria-label={
+                    selectedItems().length && selectedItems().every((item) => item.archived)
+                      ? 'Unarchive selected'
+                      : 'Archive selected'
+                  }
+                  title={
+                    selectedItems().length && selectedItems().every((item) => item.archived)
+                      ? 'Unarchive selected'
+                      : 'Archive selected'
+                  }
+                  disabled={!selected().size}
+                  data-name-transition
+                  onClick={() =>
+                    committed(() =>
+                      archiveItems(
+                        [...selected()],
+                        !selectedItems().every((item) => item.archived),
+                      ),
+                    )
+                  }
+                >
+                  <Show
+                    when={selectedItems().length && selectedItems().every((item) => item.archived)}
+                    fallback={<Archive size={17} />}
+                  >
+                    <ArchiveRestore size={17} />
+                  </Show>
+                </button>
+                <button
+                  type="button"
+                  class="icon-button danger"
+                  aria-label="Move selected to trash"
+                  title="Move selected to trash"
+                  disabled={!selected().size}
+                  data-name-transition
+                  onClick={() => committed(() => trashItems([...selected()]))}
+                >
+                  <Trash2 size={17} />
+                </button>
+              </Show>
+              <button type="button" class="text-button bulk-done" onClick={clearSelection}>
+                Done
               </button>
-            </Show>
-          </div>
+            </div>
+          </Show>
         </div>
         <div
           id="explorer-panel"
           class="explorer-panel"
-          role="tabpanel"
-          aria-labelledby={searching() ? undefined : `view-tab-${view()}`}
-          aria-label={searching() ? 'Search results' : undefined}
+          role="region"
+          aria-label={searching() ? 'Search results' : listTitle()}
         >
           <Show
             when={showTrashList()}
@@ -1643,99 +1747,6 @@ export function Workspace() {
             </Show>
           </Show>
         </div>
-        <Show when={selecting()}>
-          <div class="bulk-bar" role="group" aria-label="Selection actions">
-            <span class="bulk-count">
-              {selected().size ? `${selected().size} selected` : 'Select items'}
-            </span>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Move selected"
-              title="Move selected"
-              disabled={!selected().size}
-              data-name-transition
-              onClick={(event) => {
-                const anchor = event.currentTarget;
-                committed(() =>
-                  openMove([...selected()], anchor, 'sidebar', elementRestore(anchor)),
-                );
-              }}
-            >
-              <FolderInput size={17} />
-            </button>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label={
-                selectedItems().length && selectedItems().every((item) => item.favorite)
-                  ? 'Remove selected from favorites'
-                  : 'Add selected to favorites'
-              }
-              title={
-                selectedItems().length && selectedItems().every((item) => item.favorite)
-                  ? 'Remove selected from favorites'
-                  : 'Add selected to favorites'
-              }
-              disabled={!selected().size}
-              data-name-transition
-              onClick={() =>
-                committed(() =>
-                  favoriteItems([...selected()], !selectedItems().every((item) => item.favorite)),
-                )
-              }
-            >
-              <Show
-                when={selectedItems().length && selectedItems().every((item) => item.favorite)}
-                fallback={<Star size={17} />}
-              >
-                <StarOff size={17} />
-              </Show>
-            </button>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label={
-                selectedItems().length && selectedItems().every((item) => item.archived)
-                  ? 'Unarchive selected'
-                  : 'Archive selected'
-              }
-              title={
-                selectedItems().length && selectedItems().every((item) => item.archived)
-                  ? 'Unarchive selected'
-                  : 'Archive selected'
-              }
-              disabled={!selected().size}
-              data-name-transition
-              onClick={() =>
-                committed(() =>
-                  archiveItems([...selected()], !selectedItems().every((item) => item.archived)),
-                )
-              }
-            >
-              <Show
-                when={selectedItems().length && selectedItems().every((item) => item.archived)}
-                fallback={<Archive size={17} />}
-              >
-                <ArchiveRestore size={17} />
-              </Show>
-            </button>
-            <button
-              type="button"
-              class="icon-button danger"
-              aria-label="Move selected to trash"
-              title="Move selected to trash"
-              disabled={!selected().size}
-              data-name-transition
-              onClick={() => committed(() => trashItems([...selected()]))}
-            >
-              <Trash2 size={17} />
-            </button>
-            <button type="button" class="text-button bulk-done" onClick={clearSelection}>
-              Done
-            </button>
-          </div>
-        </Show>
         <div class="sidebar-bottom">
           <Show when={sidebarVisible()}>
             <div class="explorer-messages">
@@ -1743,18 +1754,34 @@ export function Workspace() {
             </div>
           </Show>
           <div class="sidebar-footer">
+            <For each={secondaryViews}>
+              {(item) => (
+                <button
+                  type="button"
+                  id={`view-tab-${item.id}`}
+                  class="footer-view"
+                  title={item.label}
+                  aria-current={view() === item.id && !searching() ? 'true' : undefined}
+                  data-name-transition
+                  onClick={() => committed(() => chooseView(item.id))}
+                >
+                  {item.icon()}
+                  <span class="footer-view-label">{item.label}</span>
+                </button>
+              )}
+            </For>
             <button
               type="button"
-              class="settings-button"
+              class="icon-button settings-button"
               aria-label="Settings"
+              title="Settings"
               aria-haspopup="menu"
               aria-expanded={pop()?.kind === 'settings'}
               aria-controls={pop()?.kind === 'settings' ? 'settings-menu' : undefined}
               data-name-transition
               onClick={(event) => void openSettings(event.currentTarget)}
             >
-              <Settings size={16} />
-              <span>Settings</span>
+              <Settings size={17} />
             </button>
           </div>
         </div>
@@ -1776,6 +1803,30 @@ export function Workspace() {
               <PanelLeft size={19} />
             </button>
           </Show>
+          <div class="history-buttons">
+            <button
+              type="button"
+              class="icon-button"
+              aria-label="Back"
+              title="Back to the previously opened canvas"
+              data-name-transition
+              disabled={!w.canNavigate(-1)}
+              onClick={() => void w.rename().then((saved) => saved && w.navigate(-1))}
+            >
+              <ArrowLeft size={17} />
+            </button>
+            <button
+              type="button"
+              class="icon-button"
+              aria-label="Forward"
+              title="Forward to the next opened canvas"
+              data-name-transition
+              disabled={!w.canNavigate(1)}
+              onClick={() => void w.rename().then((saved) => saved && w.navigate(1))}
+            >
+              <ArrowRight size={17} />
+            </button>
+          </div>
           <div class="document-title">
             <Show when={w.session()} fallback={<span class="empty-title">Excalidraws</span>}>
               <Show when={parentOf(activePath())}>
@@ -2013,7 +2064,7 @@ export function Workspace() {
                       Create canvas
                     </button>
                     <button type="button" onClick={() => w.importFiles()}>
-                      <ArrowUpFromLine size={16} />
+                      <Import size={16} />
                       Import
                     </button>
                   </div>

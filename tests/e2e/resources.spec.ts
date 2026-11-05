@@ -106,7 +106,7 @@ test('rapid selection cancels stale loads, commits only the last board and prese
   await ready(page);
   expect(visited.some((value) => value.includes('Switch slow'))).toBe(false);
   await expect(page.locator('.editor-mount .excalidraw')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Previous canvas' }).click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Switch source', exact: true })).toBeVisible();
   await ready(page);
   const canvas = await page.locator('.excalidraw canvas.interactive').elementHandle();
@@ -130,7 +130,7 @@ test('large libraries render a bounded list, retain selection through search and
   }
   await page.goto('/');
   await ready(page);
-  const sortButton = page.getByRole('button', { name: 'Sort canvases', exact: true });
+  const sortButton = page.getByRole('button', { name: /^Sort canvases/ });
   await sortButton.click();
   await expect(
     page.getByRole('menuitemradio', { name: 'Recent changes', exact: true }),
@@ -180,7 +180,8 @@ test('large libraries render a bounded list, retain selection through search and
         await page.keyboard.press('Escape');
         await expect(page.getByRole('menu', { name: 'Sort canvases', exact: true })).toHaveCount(0);
         await expect(page.getByRole('complementary', { name: 'Canvas explorer' })).toBeVisible();
-        await page.getByRole('button', { name: 'New folder', exact: true }).click();
+        await page.getByRole('button', { name: 'More ways to create', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
         await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toBeFocused();
         // A filesystem notification must not silently commit the inline name draft.
         const count = Number(await page.locator('.list-header .entry-count').textContent());

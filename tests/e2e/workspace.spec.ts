@@ -65,7 +65,8 @@ test('draw, immediately switch, reload, rename, move, trash and restore real doc
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill('A plan');
   await page.getByRole('button', { name: 'Save name', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'A plan', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByRole('button', { name: 'More ways to create', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
   await page.getByRole('textbox', { name: 'Folder name', exact: true }).fill('Projects');
   await page.getByRole('textbox', { name: 'Folder name', exact: true }).press('Enter');
   await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toHaveCount(0);
@@ -81,7 +82,7 @@ test('draw, immediately switch, reload, rename, move, trash and restore real doc
   await page.getByRole('button', { name: 'Actions for A plan', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Move to trash', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Trash', exact: true }).click();
+  await page.getByRole('button', { name: 'Trash', exact: true }).click();
   await page.getByRole('button', { name: 'Restore A plan', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Restore A plan', exact: true })).toHaveCount(0);
   expect((await document(request, 'Projects/A plan.excalidraw')).scene.elements).toHaveLength(1);
@@ -496,7 +497,8 @@ test('renaming an open parent folder retains the editor, saves to the new path a
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('');
   await draw(page);
   const canvas = await page.locator('.excalidraw canvas.interactive').elementHandle();
-  await page.getByRole('button', { name: 'Rename Parent workflow', exact: true }).click();
+  await page.locator('[data-entry-path="Parent workflow"]').focus();
+  await page.keyboard.press('F2');
   const name = page.getByRole('textbox', { name: 'Folder name', exact: true });
   await expect(name).toHaveValue('Parent workflow');
   await name.fill('Renamed parent');
@@ -513,11 +515,11 @@ test('renaming an open parent folder retains the editor, saves to the new path a
         ).length,
     )
     .toBe(0);
-  await page.getByRole('button', { name: 'Previous canvas', exact: true }).click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Before folder rename', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Next canvas', exact: true }).click();
+  await page.getByRole('button', { name: 'Forward', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Child', exact: true })).toBeVisible();
   await expect(page.locator('.breadcrumb-parent')).toContainText('Renamed parent');
   await page.reload();
@@ -555,16 +557,6 @@ test('inline drafts synchronize between the current tree row and title without m
     await input.pressSequentially(letter);
     await expect(row.locator('.file-name')).toHaveText(previous + letter);
   }
-  expect(moves).toHaveLength(0);
-  await row.hover();
-  await row.locator('.row-rename').click();
-  await expect(row.locator('input')).toBeFocused();
-  await expect(input).toHaveValue('Live draft');
-  await input.fill('Sidebar draft');
-  await expect(page.getByRole('heading', { name: 'Sidebar draft', exact: true })).toBeVisible();
-  await page.locator('.title-button').click();
-  await expect(page.locator('.document-title input')).toBeFocused();
-  await expect(input).toHaveValue('Sidebar draft');
   expect(moves).toHaveLength(0);
   expect(await heading!.evaluate((node) => node.isConnected)).toBe(true);
   await input.press('Escape');

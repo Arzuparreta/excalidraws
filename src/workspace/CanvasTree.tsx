@@ -18,7 +18,6 @@ import {
   Folder,
   FolderOpen,
   LoaderCircle,
-  Pencil,
   Plus,
   Star,
 } from 'lucide-solid';
@@ -479,13 +478,6 @@ export function CanvasTree(props: {
                 props.onMenu(path, event.currentTarget, { x: event.clientX, y: event.clientY });
               }}
             >
-              <Show when={props.selecting}>
-                <span class="row-check" classList={{ checked: selected() }} aria-hidden="true">
-                  <Show when={selected()}>
-                    <Check size={12} stroke-width={3} />
-                  </Show>
-                </span>
-              </Show>
               <span
                 class="row-twisty"
                 classList={{ 'row-action': folder() && !current().flat }}
@@ -503,10 +495,22 @@ export function CanvasTree(props: {
                   </Show>
                 </Show>
               </span>
+              {/* While selecting, the checkbox takes the icon's place so names do not shift. */}
               <span class="row-icon" aria-hidden="true">
-                <Show when={folder()} fallback={<FileText size={15} />}>
-                  <Show when={current().expanded} fallback={<Folder size={15} />}>
-                    <FolderOpen size={15} />
+                <Show
+                  when={!props.selecting}
+                  fallback={
+                    <span class="row-check" classList={{ checked: selected() }}>
+                      <Show when={selected()}>
+                        <Check size={12} stroke-width={3} />
+                      </Show>
+                    </span>
+                  }
+                >
+                  <Show when={folder()} fallback={<FileText size={15} />}>
+                    <Show when={current().expanded} fallback={<Folder size={15} />}>
+                      <FolderOpen size={15} />
+                    </Show>
                   </Show>
                 </Show>
               </span>
@@ -514,27 +518,9 @@ export function CanvasTree(props: {
                 <Show
                   when={props.renamingPath === path}
                   fallback={
-                    <>
-                      <button class="file-select" type="button" tabIndex={-1} title={path}>
-                        <span class="file-name">{name()}</span>
-                      </button>
-                      <button
-                        class="icon-button row-action row-rename"
-                        type="button"
-                        tabIndex={-1}
-                        data-name-transition
-                        aria-label={`Rename ${name()}`}
-                        title="Rename"
-                        onClick={(event) =>
-                          // A modifier click near the name still selects, as on the rest of the row.
-                          event.ctrlKey || event.metaKey || event.shiftKey
-                            ? props.onRowClick(current(), event)
-                            : props.onRename(path)
-                        }
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    </>
+                    <button class="file-select" type="button" tabIndex={-1} title={path}>
+                      <span class="file-name">{name()}</span>
+                    </button>
                   }
                 >
                   {props.renderRename()}
