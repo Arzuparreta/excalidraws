@@ -1176,13 +1176,13 @@ export function Workspace() {
       <Show when={w.loaded()} fallback={<p>Loading canvases…</p>}>
         <Show when={!searching()} fallback={<p>No matching canvases.</p>}>
           <Show when={view() === 'library'}>
-            <p>No canvases yet. Use New canvas above, or import .excalidraw files.</p>
+            <p>No canvases yet.</p>
           </Show>
           <Show when={view() === 'favorites'}>
-            <p>No favorites yet. Choose “Add to favorites” in a canvas or folder menu.</p>
+            <p>No favorites yet.</p>
           </Show>
           <Show when={view() === 'archive'}>
-            <p>Nothing is archived. Archived items leave the library but stay searchable.</p>
+            <p>Nothing is archived.</p>
           </Show>
         </Show>
       </Show>
@@ -1443,8 +1443,8 @@ export function Workspace() {
           <button
             type="button"
             class="icon-button"
-            aria-label="Import canvases"
-            title="Import canvases"
+            aria-label="Import .excalidraw"
+            title="Import .excalidraw"
             data-name-transition
             onClick={() => committed(() => w.importFiles())}
           >
