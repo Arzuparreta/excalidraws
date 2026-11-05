@@ -343,3 +343,26 @@ test('crossing the drawer breakpoint preserves a move picker and browser Back sk
   await expect(page).toHaveURL(/canvas=Navigation\+A.excalidraw/);
   await expect(page.locator('dialog')).toHaveCount(0);
 });
+
+test('folder arrow expands and collapses when clicking the chevron itself', async ({
+  page,
+  request,
+}) => {
+  await seed(request, 'Arrow folder', 'folder');
+  await seed(request, 'Arrow folder/Child.excalidraw');
+  await page.goto('/');
+  const folder = row(page, 'Arrow folder');
+  const child = row(page, 'Arrow folder/Child.excalidraw');
+  await expect(folder).toHaveAttribute('aria-expanded', 'true');
+  await folder.locator('.row-twisty svg').click();
+  await expect(folder).toHaveAttribute('aria-expanded', 'false');
+  await expect(child).toHaveCount(0);
+  await folder.locator('.row-twisty svg').click();
+  await expect(folder).toHaveAttribute('aria-expanded', 'true');
+  await expect(child).toBeVisible();
+  await folder.locator('.row-twisty').click({ position: { x: 1, y: 1 } });
+  await expect(child).toHaveCount(0);
+  await folder.locator('.row-twisty svg').click();
+  await expect(child).toBeVisible();
+  await page.screenshot({ path: 'test-results/folder-arrow-expanded.png' });
+});
