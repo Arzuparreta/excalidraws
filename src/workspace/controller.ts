@@ -404,13 +404,21 @@ export function createWorkspace() {
     return operation.then((done) => !!done);
   };
   const open = (path: string) => requestOpen({ path, history: 'push' });
-  const navigate = (direction: number) => {
+  const navigationIndex = (direction: -1 | 1) => {
     const value = navigation();
     let index = value.index + direction;
-    while (index >= 0 && index < value.paths.length && !entry(value.paths[index]))
+    while (index >= 0 && index < value.paths.length) {
+      if (entry(value.paths[index])?.kind === 'file') return index;
       index += direction;
+    }
+    return -1;
+  };
+  const canNavigate = (direction: -1 | 1) => navigationIndex(direction) !== -1;
+  const navigate = (direction: -1 | 1) => {
+    const value = navigation();
+    const index = navigationIndex(direction);
+    if (index === -1) return;
     const path = value.paths[index];
-    if (!path) return;
     if (historyIndex(window.history.state) === value.index) window.history.go(index - value.index);
     else void requestOpen({ path, history: 'replace', index });
   };
@@ -1135,7 +1143,7 @@ export function createWorkspace() {
     reloadConfirm,
     setReloadConfirm,
     switchTarget,
-    navigation,
+    canNavigate,
     folders: createMemo(() => entries().filter((e) => e.kind === 'folder')),
     open,
     navigate,
