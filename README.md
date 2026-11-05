@@ -43,7 +43,8 @@ not maintain an editor fork or provide an installable plugin for excalidraw.com.
   offer Undo. Dismissing Undo does not remove items from Trash.
 - The explorer supports keyboard navigation, F2 to rename, and contextual-menu keys.
   Organization shortcuts are scoped to the explorer so they do not replace drawing tools.
-  Ctrl/Cmd+K focuses search outside the editor; Ctrl/Cmd+Shift+K is the global alternative.
+  Ctrl/Cmd+Shift+F focuses canvas search from anywhere. Ctrl/Cmd+K also works outside
+  the editor; inside the editor it keeps its link-editing function.
 - Hide the sidebar for more drawing space. Below 1024 px, or in a viewport shorter than
   500 px, it becomes an overlay drawer. Its focus stays contained while open. Touch
   controls have larger targets, and rare document actions move into the topbar menu.

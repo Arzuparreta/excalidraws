@@ -277,6 +277,32 @@ test('images and viewport survive import, switching and export; clean external c
   await page.screenshot({ path: 'test-results/workspace-desktop.png', fullPage: true });
 });
 
+test('global canvas search works from the editor and preserves its link shortcut', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await create(page, 'Search shortcut');
+  const search = page.getByRole('textbox', { name: 'Search canvases', exact: true });
+  const canvas = page.locator('.excalidraw canvas.interactive');
+  const editor = page.locator('.excalidraw-container');
+  await expect(page.locator('.search-shortcut')).toHaveText('Ctrl ⇧ F');
+  await canvas.click();
+  await page.keyboard.press('Control+k');
+  await expect(editor).toBeFocused();
+  await page.keyboard.press('Control+Shift+F');
+  await expect(search).toBeFocused();
+  await search.fill('Search shortcut');
+  await expect(page.getByRole('button', { name: 'Search shortcut', exact: true })).toBeVisible();
+  await search.fill('');
+  await canvas.click();
+  await page.keyboard.press('Meta+Shift+F');
+  await expect(search).toBeFocused();
+  await page.getByRole('heading', { name: 'Search shortcut', exact: true }).click();
+  await page.keyboard.press('Control+k');
+  await expect(search).toBeFocused();
+  await page.screenshot({ path: 'test-results/search-shortcut.png', fullPage: true });
+});
+
 test('mobile explorer, search and dialogs fit the viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
