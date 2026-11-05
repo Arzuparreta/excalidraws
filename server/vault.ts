@@ -609,12 +609,15 @@ export class Vault {
 
   /**
    * Moves or renames a canvas together with the canvases inside it. Links in other
-   * canvases that point into it are rewritten; `exclude` names a canvas whose links the
-   * client updates itself, typically the open one. Returns the canvases rewritten.
+   * canvases that point into it are rewritten next in the queue, so the move completes
+   * without reading every canvas, and any later save waits for the rewrite. `exclude`
+   * names a canvas whose links the client updates itself, typically the open one.
+   * `links` resolves to the canvases rewritten.
    */
   async move(from: string, to: string, exclude?: string) {
-    return this.serial(async () => {
-      if (from === to) return { rewritten: [] as string[] };
+    let links: Promise<string[]> = Promise.resolve([]);
+    await this.serial(async () => {
+      if (from === to) return;
       const source = await this.requireCanvas(from);
       const target = await this.locate(to);
       if (inCanvas(to, from)) throw new VaultError(400, 'A canvas cannot be moved inside itself.');
@@ -659,16 +662,13 @@ export class Vault {
         ).catch((error) => console.error('History could not follow a move.', error));
       }
       await this.removeEmptyFolder(folderOf(from));
-      const rewritten = await this.rewriteLinks(
-        from,
-        to,
-        exclude === undefined ? undefined : relocated(exclude, from, to),
-      ).catch((error) => {
+      const skip = exclude === undefined ? undefined : relocated(exclude, from, to);
+      links = this.serial(() => this.rewriteLinks(from, to, skip)).catch((error) => {
         console.error('Links to a moved canvas could not be updated.', error);
         return [] as string[];
       });
-      return { rewritten };
     });
+    return { links };
   }
 
   /** Points links to `from` and the canvases inside it at their new paths. */

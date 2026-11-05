@@ -206,7 +206,8 @@ contains canvases. A folder without a matching `.excalidraw` file, such as one c
 outside the workspace or by an earlier version, is shown as an empty canvas; its file is
 written the first time it is saved. Links between canvases are element links of the form
 `/?canvas=Ideas/Idea%20A.excalidraw`. Moving or renaming a canvas rewrites those links in
-the other canvases and keeps the previous version of each rewritten file in its history;
+the other canvases right after the move, before any later save, and keeps the previous
+version of each rewritten file in its history;
 links written as absolute URLs are not rewritten.
 
 Moving or renaming canvases carries their saved history and workspace metadata

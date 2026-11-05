@@ -67,7 +67,9 @@ export function createApp(vault: Vault, clientDirectory?: string) {
     const body = z
       .object({ from: z.string(), to: z.string(), exclude: z.string().optional() })
       .parse(req.body);
-    res.json(await vault.move(body.from, body.to, body.exclude));
+    // Links to the moved canvas are rewritten after the response, before any later write.
+    await vault.move(body.from, body.to, body.exclude);
+    res.json({ ok: true });
   });
   app.post('/api/trash', async (req, res) =>
     res.json(await vault.trash(z.object({ path: z.string() }).parse(req.body).path)),

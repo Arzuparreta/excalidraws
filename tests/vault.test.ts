@@ -187,12 +187,12 @@ test('moving a canvas rewrites the links that point into it', async (t) => {
   await vault.create('Plain.excalidraw');
   const before = await vault.read('Ideas.excalidraw');
   const plain = await vault.read('Plain.excalidraw');
-  const result = await vault.move(
+  const { links } = await vault.move(
     'Ideas/Idea A.excalidraw',
     'Ideas/Renamed.excalidraw',
     'Index.excalidraw',
   );
-  assert.deepEqual(result.rewritten, ['Ideas.excalidraw']);
+  assert.deepEqual(await links, ['Ideas.excalidraw']);
   const elements = (await vault.read('Ideas.excalidraw')).scene.elements;
   assert.deepEqual(
     elements.map((item) => item.link),

@@ -77,6 +77,7 @@ test('draw, immediately switch, reload, rename, move, trash and restore real doc
   await expect
     .poll(async () => (await document(request, 'Projects/A plan.excalidraw')).scene.elements.length)
     .toBe(1);
+  await expect(page.locator('[data-entry-path="Projects/A plan.excalidraw"]')).toBeVisible();
   await page.getByRole('button', { name: 'Actions for A plan', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Move to trash', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);

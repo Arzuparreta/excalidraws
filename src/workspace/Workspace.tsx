@@ -1031,10 +1031,7 @@ export function Workspace() {
       <p class="popover-help">
         These canvases are inside this one, but nothing in its drawing links to them.
       </p>
-      <Show
-        when={unlinked().length}
-        fallback={<p class="popover-empty">Every canvas inside is linked.</p>}
-      >
+      <Show when={unlinked().length}>
         <ul class="unlinked-list">
           <For each={unlinked()}>
             {(entry) => (
@@ -1490,6 +1487,21 @@ export function Workspace() {
           queueMicrotask(() => sidebar.contains(document.activeElement) || focusExplorerEntry());
       },
       { defer: true },
+    ),
+  );
+  // Once every canvas inside is linked, the list and the count that anchors it are gone.
+  createEffect(
+    on(
+      () => unlinked().length,
+      (count) => {
+        if (count || pop()?.kind !== 'unlinked') return;
+        closePop(false);
+        // The editor usually takes focus to select the added labels; never leave it on body.
+        queueMicrotask(() => {
+          if (!document.activeElement || document.activeElement === document.body)
+            titleButton?.focus();
+        });
+      },
     ),
   );
   // An unresolved conflict confirmation is closed when the conflict itself is gone.

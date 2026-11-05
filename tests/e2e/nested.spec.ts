@@ -105,8 +105,10 @@ test('a selected label becomes a canvas inside, linked to it, and links open can
   await expect(report.getByText('Second idea', { exact: true })).toBeVisible();
   await page.screenshot({ path: 'test-results/nested-unlinked.png' });
   await report.getByRole('button', { name: 'Add a link to Second idea', exact: true }).click();
-  await expect(report.getByText('Every canvas inside is linked.')).toBeVisible();
+  // The list closes once every canvas inside is linked.
+  await expect(report).toHaveCount(0);
   await expect(unlinked).toHaveCount(0);
+  expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
   await expect
     .poll(async () => (await links(request, 'Link hub.excalidraw')).sort())
     .toEqual(

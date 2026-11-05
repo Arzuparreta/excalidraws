@@ -50,7 +50,7 @@ export const api = {
   create: (path: string, scene?: Scene) => request<Document>('/entries', { path, scene }),
   /** Moves a canvas with its contents. Links to it are rewritten except in `exclude`. */
   move: (from: string, to: string, exclude?: string) =>
-    request<{ rewritten: string[] }>('/move', { from, to, exclude }),
+    request<{ ok: true }>('/move', { from, to, exclude }),
   trash: (path: string) => request<TrashEntry>('/trash', { path }),
   listTrash: () => request<TrashEntry[]>('/trash'),
   // Without path: the original location, or a readable "(restored)" name if it is occupied.
