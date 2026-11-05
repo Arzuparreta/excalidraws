@@ -3,7 +3,7 @@
 ## Goal
 
 Extend the official Excalidraw editor into a personal file workspace: a collapsible left
-sidebar, folders, multiple canvases, automatic saving on the desktop, and access from other
+sidebar, canvases that contain canvases, automatic saving on the desktop, and access from other
 devices. The repository started empty; the editor remains an upstream dependency.
 
 ## Architecture
@@ -21,6 +21,10 @@ devices. The repository started empty; the editor remains an upstream dependency
   document polling or vault scanning runs in the browser. Graceful shutdown closes streams.
 - A configurable folder is the source of truth. Documents are standard `.excalidraw` JSON
   files with embedded images and viewport state. There is no database.
+- Every library item is a canvas. The canvas `Ideas.excalidraw` keeps the canvases inside it
+  in the sibling folder `Ideas/`, which exists only while it has contents; a folder without
+  its file is an unsaved, empty canvas. `shared/canvas.ts` holds these path rules and the
+  relative `/?canvas=` link format for both the service and the workspace.
 - SHA-256 revisions and temporary-file writes followed by fsync and rename. A queue serializes
   service mutations. Clients always submit the revision they opened.
 - Trash and history live outside the visible tree. Names and paths are validated, symbolic
@@ -36,17 +40,20 @@ devices. The repository started empty; the editor remains an upstream dependency
 - Cancel obsolete document reads and commit only the latest requested canvas. Keep navigation
   history as paths rather than retaining inactive scenes. Undo history belongs to the one
   active editor and resets when it is destroyed.
-- Keep the active canvas in its folder in a virtualized keyboard-navigable explorer.
+- Keep the active canvas in its place in a virtualized keyboard-navigable explorer.
   Favorites, Archive, and Trash use the same explorer area. On narrow or short viewports,
   contain keyboard/pointer interaction in an overlay drawer without resizing the canvas.
 - Store shared organization in `.workspace/library.json`, separately from scene data.
-  File and folder moves carry metadata and history; trash/restore retain both.
+  Canvas moves carry metadata, history, and the canvases inside; trash/restore retain all
+  of them. Moves rewrite relative links in other canvases; the open canvas is updated in the
+  editor so its unsaved drawing is never replaced.
 - Anchor management surfaces to their controls. Reversible actions offer Undo; discarding
   local edits requires inline confirmation. See [UX-DESIGN.md](UX-DESIGN.md).
 - Reload external changes when the editor is clean. When local edits exist, retain the draft
   and offer to load the server version or save a copy.
 - Compare the draft's original revision when recovering after a page reload.
-- Support creating, renaming, and moving files and folders. Deletion sends them to the trash.
+- Support creating, renaming, and moving canvases, inside other canvases too. Deletion sends
+  them to the trash with their contents.
 - Use the native format for imports and exports. Detect conflicts between devices without
   attempting to merge simultaneous edits or provide CRDT collaboration.
 - Use English throughout the UI and repository, including errors, comments, filenames,

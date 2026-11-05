@@ -18,7 +18,7 @@ async function themed(page: Page, theme: 'light' | 'dark') {
   await expect(page.locator('html')).toHaveCSS('color-scheme', theme);
 }
 async function open(page: Page, request: APIRequestContext, path: string) {
-  expect((await request.post('/api/entries', { data: { path, kind: 'file' } })).ok()).toBe(true);
+  expect((await request.post('/api/entries', { data: { path } })).ok()).toBe(true);
   await page.goto(`/?canvas=${encodeURIComponent(path)}`);
   await expect(page.locator('.excalidraw canvas.interactive')).toBeVisible();
   await expect(page.locator('.save-status')).toContainText('Saved');

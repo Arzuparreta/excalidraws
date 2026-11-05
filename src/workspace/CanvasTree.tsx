@@ -15,16 +15,30 @@ import {
   ChevronRight,
   Ellipsis,
   FileText,
-  Folder,
-  FolderOpen,
+  Link2,
   LoaderCircle,
   Plus,
   Star,
 } from 'lucide-solid';
-import { displayName, folderLabel, isInside, parentOf, type Row } from './tree';
+import {
+  childFolder,
+  displayName,
+  folderCanvas,
+  folderLabel,
+  isInside,
+  locationLabel,
+  parentOf,
+  type Row,
+} from './tree';
 
+/**
+ * `into` moves into the canvas that owns `folder` ('' is the top level). `before` and
+ * `after` place beside a canvas. `link` adds links to the open canvas at a viewport point.
+ */
 export type DropTarget =
-  { kind: 'into'; folder: string } | { kind: 'before' | 'after'; path: string };
+  | { kind: 'into'; folder: string }
+  | { kind: 'before' | 'after'; path: string }
+  | { kind: 'link'; x: number; y: number };
 export interface TreeApi {
   /** Scrolls a row into view and focuses it, rendering it first if it is offscreen. */
   focus(path?: string, scroll?: boolean): void;
@@ -76,6 +90,8 @@ export function CanvasTree(props: {
   onReorder(path: string, delta: -1 | 1): void;
   dragPaths(path: string): string[];
   onDrop(paths: string[], target: DropTarget): void;
+  /** Whether dropping these canvases at a viewport point outside the list links them. */
+  canLink?(paths: string[], point: Point): boolean;
   ref?(api: TreeApi): void;
 }) {
   let scroller!: HTMLDivElement;
@@ -196,14 +212,13 @@ export function CanvasTree(props: {
         return go(rows.length - 1);
       case 'ArrowRight':
         handled();
-        if (row.entry.kind !== 'folder' || row.flat) return;
+        if (!row.expandable || row.flat) return;
         if (!row.expanded) props.onToggle(path, true);
         else if ((rows[i + 1]?.depth ?? -1) > row.depth) focusRow(rows[i + 1]!.entry.path);
         return;
       case 'ArrowLeft': {
         handled();
-        if (row.entry.kind === 'folder' && row.expanded && !row.flat)
-          return props.onToggle(path, false);
+        if (row.expandable && row.expanded && !row.flat) return props.onToggle(path, false);
         for (let j = i - 1; j >= 0; j--)
           if (rows[j]!.depth < row.depth) return focusRow(rows[j]!.entry.path);
         return;
@@ -251,8 +266,9 @@ export function CanvasTree(props: {
   let hoverTimer: ReturnType<typeof setTimeout> | undefined;
   let hoverFolder: string | undefined;
   const validTarget = (paths: string[], target: DropTarget): DropTarget | undefined => {
+    if (target.kind === 'link') return target;
     if (target.kind === 'into') {
-      if (paths.some((path) => isInside(target.folder, path))) return undefined;
+      if (paths.some((path) => isInside(folderCanvas(target.folder), path))) return undefined;
       if (paths.every((path) => parentOf(path) === target.folder)) return undefined;
       return target;
     }
@@ -264,10 +280,11 @@ export function CanvasTree(props: {
     if (folder === hoverFolder) return;
     clearTimeout(hoverTimer);
     hoverFolder = folder;
-    const row = folder ? byPath().get(folder) : undefined;
-    if (!folder || !row || row.expanded || row.flat) return;
+    const canvas = folder ? folderCanvas(folder) : '';
+    const row = canvas ? byPath().get(canvas) : undefined;
+    if (!folder || !row || !row.expandable || row.expanded || row.flat) return;
     hoverTimer = setTimeout(() => {
-      if (drag() && hoverFolder === folder) props.onToggle(folder, true);
+      if (drag() && hoverFolder === folder) props.onToggle(canvas, true);
     }, HOVER_EXPAND_MS);
   };
   const updateTarget = () => {
@@ -291,14 +308,13 @@ export function CanvasTree(props: {
         const rect = rowEl.getBoundingClientRect();
         const ratio = (point.y - rect.top) / rect.height;
         const path = row.entry.path;
-        const folder = row.entry.kind === 'folder';
-        if (props.reorderable) {
-          if (folder && ratio > 0.28 && (ratio < 0.72 || row.expanded))
-            target = { kind: 'into', folder: path };
-          else target = { kind: ratio < 0.5 ? 'before' : 'after', path };
-        } else target = { kind: 'into', folder: folder ? path : parentOf(path) };
+        // The middle of a row moves into that canvas; its edges place beside it.
+        if (props.reorderable && !(ratio > 0.28 && (ratio < 0.72 || row.expanded)))
+          target = { kind: ratio < 0.5 ? 'before' : 'after', path };
+        else target = { kind: 'into', folder: childFolder(path) };
       }
-    }
+    } else if (props.canLink?.(current.paths, point))
+      target = { kind: 'link', x: point.x, y: point.y };
     target = target && validTarget(current.paths, target);
     setDropTarget(target);
     hoverExpand(target);
@@ -382,7 +398,8 @@ export function CanvasTree(props: {
   const isTarget = (path: string, kind: DropTarget['kind']) => {
     const target = dropTarget();
     if (!target || target.kind !== kind) return false;
-    return target.kind === 'into' ? target.folder === path : target.path === path;
+    if (target.kind === 'link') return false;
+    return target.kind === 'into' ? target.folder === childFolder(path) : target.path === path;
   };
 
   createEffect(
@@ -428,11 +445,13 @@ export function CanvasTree(props: {
           const path = rowProps.path;
           const entry = () => current().entry;
           const name = () => (props.draft?.path === path ? props.draft.name : displayName(entry()));
-          const folder = () => entry().kind === 'folder';
+          const expandable = () => current().expandable && !current().flat;
           const selected = () => props.selected.has(path);
+          const count = () => current().inside;
           const label = () =>
             [
               name(),
+              count() ? `${count()} ${count() === 1 ? 'canvas' : 'canvases'} inside` : '',
               current().flat && entry().archived ? 'archived' : '',
               current().flat ? `in ${folderLabel(parentOf(path))}` : '',
             ]
@@ -448,12 +467,12 @@ export function CanvasTree(props: {
               aria-level={current().depth + 1}
               aria-posinset={current().posinset}
               aria-setsize={current().setsize}
-              aria-expanded={folder() && !current().flat ? current().expanded : undefined}
+              aria-expanded={expandable() ? current().expanded : undefined}
               aria-selected={selected()}
               aria-current={props.currentPath === path ? 'page' : undefined}
               aria-busy={props.pending.has(path) || undefined}
               classList={{
-                'is-folder': folder(),
+                'has-inside': count() > 0,
                 'is-current': props.currentPath === path,
                 'is-selected': selected(),
                 'is-pending': props.pending.has(path),
@@ -480,16 +499,16 @@ export function CanvasTree(props: {
             >
               <span
                 class="row-twisty"
-                classList={{ 'row-action': folder() && !current().flat }}
+                classList={{ 'row-action': expandable() }}
                 aria-hidden="true"
                 onClick={(event) => {
-                  if (!folder() || current().flat) return;
+                  if (!expandable()) return;
                   // Toggling replaces the SVG target before the delegated row handler runs.
                   event.stopPropagation();
                   props.onToggle(path, !current().expanded);
                 }}
               >
-                <Show when={folder() && !current().flat}>
+                <Show when={expandable()}>
                   <Show when={current().expanded} fallback={<ChevronRight size={14} />}>
                     <ChevronDown size={14} />
                   </Show>
@@ -507,11 +526,7 @@ export function CanvasTree(props: {
                     </span>
                   }
                 >
-                  <Show when={folder()} fallback={<FileText size={15} />}>
-                    <Show when={current().expanded} fallback={<Folder size={15} />}>
-                      <FolderOpen size={15} />
-                    </Show>
-                  </Show>
+                  <FileText size={15} />
                 </Show>
               </span>
               <div class="file-name-slot">
@@ -528,7 +543,7 @@ export function CanvasTree(props: {
               </div>
               <Show when={current().flat && parentOf(path)}>
                 <span class="file-parent" aria-hidden="true">
-                  {parentOf(path)}
+                  {locationLabel(path)}
                 </span>
               </Show>
               <Show when={current().flat && entry().archived}>
@@ -546,14 +561,19 @@ export function CanvasTree(props: {
                   <LoaderCircle size={14} />
                 </span>
               </Show>
-              <Show when={folder() && props.canCreate && !current().flat}>
+              <Show when={count() > 0}>
+                <span class="row-count" aria-hidden="true">
+                  {count()}
+                </span>
+              </Show>
+              <Show when={props.canCreate && !current().flat && !entry().archived}>
                 <button
                   class="icon-button row-action row-create"
                   type="button"
                   tabIndex={-1}
                   data-menu-trigger
-                  aria-label={`New in ${name()}`}
-                  title="New canvas or folder here"
+                  aria-label={`New inside ${name()}`}
+                  title="New canvas inside"
                   aria-haspopup="menu"
                   onClick={(event) => props.onCreateMenu(path, event.currentTarget)}
                 >
@@ -586,6 +606,7 @@ export function CanvasTree(props: {
       class="file-list"
       classList={{
         'is-dragging': !!drag(),
+        'is-linking': dropTarget()?.kind === 'link',
         'is-selecting': props.selecting,
         'drop-root':
           dropTarget()?.kind === 'into' && (dropTarget() as { folder: string }).folder === '',
@@ -627,6 +648,12 @@ export function CanvasTree(props: {
             {current().label}
             <Show when={dropTarget()?.kind === 'into'}>
               <small>to {folderLabel((dropTarget() as { folder: string }).folder)}</small>
+            </Show>
+            <Show when={dropTarget()?.kind === 'link'}>
+              <small class="drag-link">
+                <Link2 size={12} aria-hidden="true" />
+                Link in this canvas
+              </small>
             </Show>
           </div>
         )}

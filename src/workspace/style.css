@@ -714,6 +714,31 @@ kbd {
 .row-pending svg {
   animation: spin 900ms linear infinite;
 }
+/* How many canvases are inside. It sits where the row actions appear on hover. */
+.row-count {
+  position: absolute;
+  right: 8px;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+  pointer-events: none;
+}
+.file-row:is(:hover, :focus-within, :focus-visible, .is-selected, .is-renaming) .row-count,
+.file-row:has(button.row-menu[aria-expanded='true']) .row-count {
+  visibility: hidden;
+}
+.workspace.coarse .row-count {
+  right: 50px;
+  visibility: visible;
+}
+.file-list.is-selecting .row-count {
+  visibility: visible;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -738,6 +763,11 @@ kbd {
   color: #c9c7ff;
   font-size: 11px;
   font-weight: 450;
+}
+.drag-ghost small.drag-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .list-empty {
   padding: 14px 6px;
@@ -899,6 +929,8 @@ kbd {
   outline: none;
 }
 .popover-move,
+.popover-link,
+.popover-unlinked,
 .popover-history {
   width: 320px;
   max-width: calc(100vw - 16px);
@@ -976,11 +1008,11 @@ kbd {
   margin: 4px 6px;
   background: var(--line);
 }
-.move-picker {
+.canvas-picker {
   display: flex;
   flex-direction: column;
 }
-.workspace .move-picker button.move-out {
+.workspace .canvas-picker button.picker-action {
   justify-content: flex-start;
   min-height: var(--control);
   margin: 0 0 4px;
@@ -989,15 +1021,15 @@ kbd {
   color: var(--ink);
   text-align: left;
 }
-.workspace .move-picker button.move-out:hover {
+.workspace .canvas-picker button.picker-action:hover {
   background: var(--accent-soft);
 }
-.workspace .move-picker button.move-out span {
+.workspace .canvas-picker button.picker-action span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.move-picker input.popover-filter {
+.canvas-picker input.popover-filter {
   height: var(--control);
   margin: 0 0 4px;
   padding: 0 10px;
@@ -1006,17 +1038,17 @@ kbd {
   background: var(--raised);
   font-size: 13px;
 }
-.workspace.coarse .move-picker input.popover-filter {
+.workspace.coarse .canvas-picker input.popover-filter {
   font-size: 16px;
 }
-.move-options {
+.picker-options {
   max-height: 280px;
   margin: 0;
   padding: 0;
   overflow-y: auto;
   list-style: none;
 }
-.move-option {
+.picker-option {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -1026,36 +1058,36 @@ kbd {
   color: var(--muted);
   cursor: pointer;
 }
-.move-option:hover,
-.move-option.active {
+.picker-option:hover,
+.picker-option.active {
   background: var(--accent-faint);
 }
-.move-option.active {
+.picker-option.active {
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
-.move-option.current {
+.picker-option.current {
   opacity: 0.55;
   cursor: default;
 }
-.move-option-text {
+.picker-option-text {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-.move-option-text > span,
-.move-option-text small {
+.picker-option-text > span,
+.picker-option-text small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.move-option-text > span {
+.picker-option-text > span {
   color: var(--ink);
   font-size: 13px;
 }
-.move-option-text small {
+.picker-option-text small {
   font-size: 11px;
 }
-.move-empty {
+.picker-empty {
   padding: 8px 9px;
   color: var(--muted);
   font-size: 12px;
@@ -1076,6 +1108,45 @@ kbd {
   padding: 4px 4px 4px 9px;
   border-top: 1px solid var(--line);
   font-size: 12.5px;
+}
+.unlinked-list {
+  max-height: min(320px, 50dvh);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.unlinked-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control);
+  padding: 2px 2px 2px 9px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+.unlinked-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace .unlinked-row button.icon-button {
+  width: 28px;
+  height: 28px;
+}
+.workspace.coarse .unlinked-row button.icon-button {
+  width: 44px;
+  height: 44px;
+}
+.workspace .unlinked-panel button.unlinked-all {
+  width: 100%;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
 }
 
 /* Document area. */
@@ -1137,7 +1208,63 @@ kbd {
   white-space: nowrap;
 }
 .breadcrumb-chevron {
+  flex-shrink: 0;
   color: var(--muted);
+}
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex: 0 3 auto;
+  min-width: 0;
+  max-width: 45%;
+  gap: 2px;
+}
+.workspace .breadcrumb button.breadcrumb-parent {
+  max-width: none;
+  min-width: 2.5em;
+}
+.workspace .breadcrumb button.breadcrumb-parent:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.workspace .breadcrumb button.breadcrumb-more {
+  flex-shrink: 0;
+  min-width: 0;
+}
+.workspace button.unlinked-button {
+  height: var(--control);
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--warning-ink);
+  font-size: 12px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+.workspace button.unlinked-button:hover {
+  background: transparent;
+}
+/* The pill is the visible control; the button keeps the full touch target. */
+.unlinked-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--warning-line);
+  border-radius: 999px;
+  background: var(--warning-bg);
+}
+.unlinked-button:is(:hover, [aria-expanded='true']) .unlinked-pill {
+  border-color: var(--warning-ink);
+}
+.workspace .unlinked-button:focus-visible {
+  outline: none;
+}
+.unlinked-button:focus-visible .unlinked-pill {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .canvas-name {
   display: flex;
@@ -1406,9 +1533,18 @@ kbd {
     opacity 140ms ease,
     visibility 0s linear 140ms;
 }
+.workspace.drawer .breadcrumb,
 .workspace.drawer .breadcrumb-parent,
 .workspace.drawer .breadcrumb-chevron {
   display: none;
+}
+.workspace.drawer .unlinked-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .workspace.drawer .save-status {
   min-width: 26px;

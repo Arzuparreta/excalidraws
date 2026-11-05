@@ -1,5 +1,26 @@
 # Delivery verification
 
+## Canvases inside canvases
+
+Verified on November 5, 2026.
+
+- `npm run check` passes: client/server TypeScript, 45 logic/session/vault tests,
+  production build, and 31 Chromium E2E flows. Formatting passes and `npm audit`
+  reports zero vulnerabilities.
+- Vault tests cover content folders that appear with the first canvas inside and are
+  removed with the last one, folders without files listed and saved as canvases, name
+  collisions with either the file or the folder, moves and trash of canvases with and
+  without files, link rewriting with history and exclusion of the open canvas,
+  metadata and trash records written for folders by earlier versions, path limits,
+  and restore into recreated or existing containing canvases.
+- Browser coverage includes creating a canvas inside the open one from selected text,
+  the not-linked count and its Add link action, link rewriting in the open editor on
+  rename without a conflict, following links in the workspace, a link to a missing
+  canvas, dragging rows onto the drawing, the picker excluding a moved canvas and its
+  contents, Undo of a move restoring links, and trash reporting contained canvases.
+- Desktop light and dark, and 390 × 844 touch captures of the explorer, row menu,
+  move picker, link dialog, not-linked list, and breadcrumb were inspected.
+
 ## Service rebuilds and README screenshot
 
 Verified on November 5, 2026.

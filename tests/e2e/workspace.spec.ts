@@ -65,20 +65,19 @@ test('draw, immediately switch, reload, rename, move, trash and restore real doc
   await page.getByRole('textbox', { name: 'Canvas name', exact: true }).fill('A plan');
   await page.getByRole('button', { name: 'Save name', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'A plan', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'More ways to create', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Folder name', exact: true }).fill('Projects');
-  await page.getByRole('textbox', { name: 'Folder name', exact: true }).press('Enter');
-  await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect((await request.post('/api/entries', { data: { path: 'Projects.excalidraw' } })).ok()).toBe(
+    true,
+  );
+  await expect(page.locator('[data-entry-path="Projects.excalidraw"]')).toBeVisible();
   await page.getByRole('button', { name: 'Actions for A plan', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Move to…', exact: true }).click();
   await page.screenshot({ path: 'test-results/move-in-sidebar-desktop.png' });
   await page.getByRole('option', { name: /^Projects/ }).click();
-  await expect(page.getByRole('dialog', { name: 'Move to folder' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Move to canvas' })).toHaveCount(0);
   await expect
     .poll(async () => (await document(request, 'Projects/A plan.excalidraw')).scene.elements.length)
     .toBe(1);
+  await expect(page.locator('[data-entry-path="Projects/A plan.excalidraw"]')).toBeVisible();
   await page.getByRole('button', { name: 'Actions for A plan', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Move to trash', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -383,9 +382,9 @@ test('creation has explicit destinations and concurrent name collisions are retr
   page,
   request,
 }) => {
-  await request.post('/api/entries', { data: { path: 'Naming workflow', kind: 'folder' } });
+  await request.post('/api/entries', { data: { path: 'Naming workflow.excalidraw' } });
   await request.post('/api/entries', {
-    data: { path: 'Naming workflow/Untitled canvas.excalidraw', kind: 'file' },
+    data: { path: 'Naming workflow/Untitled canvas.excalidraw' },
   });
   await page.goto('/');
   await expect(page.locator('.explorer-actions .new-canvas')).toBeEnabled();
@@ -402,37 +401,40 @@ test('creation has explicit destinations and concurrent name collisions are retr
     }
     await route.continue();
   });
-  await createHere('New canvas here');
+  await createHere('New canvas inside');
   await expect(
     page.getByRole('heading', { name: 'Untitled canvas (2)', exact: true }),
   ).toBeVisible();
   expect((await document(request, 'Naming workflow/Untitled canvas (2).excalidraw')).path).toBe(
     'Naming workflow/Untitled canvas (2).excalidraw',
   );
-  await createHere('New canvas here');
+  await createHere('New canvas inside');
   await expect(
     page.getByRole('heading', { name: 'Untitled canvas (3)', exact: true }),
   ).toBeVisible();
-  await createHere('New folder here');
-  const folderName = page.getByRole('textbox', { name: 'Folder name', exact: true });
-  await expect(folderName).toBeFocused();
-  await folderName.press('Escape');
-  await expect(page.locator('[data-entry-path="Naming workflow/Untitled folder"]')).toBeVisible();
-  await createHere('New folder here');
-  await expect(folderName).toHaveValue('Untitled folder (1)');
-  await folderName.fill('Ideas.excalidraw');
-  await folderName.press('Enter');
-  const tree = await (await request.get('/api/entries')).json();
-  expect(tree.some((e: { path: string }) => e.path === 'Naming workflow/Ideas.excalidraw')).toBe(
-    true,
+  await expect(page.locator('.breadcrumb-parent')).toHaveText('Naming workflow');
+  await page.getByRole('textbox', { name: 'Search canvases' }).fill('');
+
+  // Any canvas can receive canvases, from its own + button.
+  const empty = page.locator('[data-entry-path="Naming workflow/Untitled canvas (3).excalidraw"]');
+  await expect(empty).not.toHaveAttribute('aria-expanded');
+  await empty.hover();
+  await empty.getByRole('button', { name: 'New inside Untitled canvas (3)', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'New inside Untitled canvas (3)', exact: true });
+  await expect(menu.getByRole('menuitem')).toHaveText(['New canvas inside', 'Import inside…']);
+  await menu.getByRole('menuitem', { name: 'New canvas inside', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Untitled canvas', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(
+    (url) =>
+      url.searchParams.get('canvas') ===
+      'Naming workflow/Untitled canvas (3)/Untitled canvas.excalidraw',
   );
-  expect(
-    tree.some(
-      (e: { path: string }) => e.path === 'Naming workflow/Untitled folder/Untitled folder',
-    ),
-  ).toBe(false);
-  // Expanding a folder never changes the global create destination.
-  await page.locator('[data-entry-path="Naming workflow"] .file-select').click();
+  await expect(empty).toHaveAttribute('aria-expanded', 'true');
+  await expect(empty.locator('.row-count')).toHaveText('1');
+
+  // Opening a canvas never changes the global create destination.
+  await page.locator('[data-entry-path="Naming workflow.excalidraw"] .file-select').click();
+  await expect(page.getByRole('heading', { name: 'Naming workflow', exact: true })).toBeVisible();
   await page.locator('.explorer-actions .new-canvas').click();
   await expect(page.locator('.processing')).toHaveCount(0);
   const entries = await (await request.get('/api/entries')).json();
@@ -446,7 +448,7 @@ test('inline naming handles errors, cancellation, blur and creation without losi
   request,
 }) => {
   await request.post('/api/entries', {
-    data: { path: 'Inline occupied.excalidraw', kind: 'file' },
+    data: { path: 'Inline occupied.excalidraw' },
   });
   await page.goto('/');
   await create(page, 'Inline original');
@@ -481,28 +483,28 @@ test('inline naming handles errors, cancellation, blur and creation without losi
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
-test('renaming an open parent folder retains the editor, saves to the new path and updates navigation', async ({
+test('renaming the canvas that contains the open one retains the editor, saves to the new path and updates navigation', async ({
   page,
   request,
 }) => {
-  await request.post('/api/entries', { data: { path: 'Parent workflow', kind: 'folder' } });
+  await request.post('/api/entries', { data: { path: 'Parent workflow.excalidraw' } });
   await request.post('/api/entries', {
-    data: { path: 'Parent workflow/Child.excalidraw', kind: 'file' },
+    data: { path: 'Parent workflow/Child.excalidraw' },
   });
   await page.goto('/');
-  await create(page, 'Before folder rename');
+  await create(page, 'Before parent rename');
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('Parent workflow/Child');
   await page.getByRole('button', { name: 'Child', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Child', exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'Search canvases' }).fill('');
   await draw(page);
   const canvas = await page.locator('.excalidraw canvas.interactive').elementHandle();
-  await page.locator('[data-entry-path="Parent workflow"]').focus();
+  await page.locator('[data-entry-path="Parent workflow.excalidraw"]').focus();
   await page.keyboard.press('F2');
-  const name = page.getByRole('textbox', { name: 'Folder name', exact: true });
+  const name = page.getByRole('textbox', { name: 'Canvas name', exact: true });
   await expect(name).toHaveValue('Parent workflow');
   await name.fill('Renamed parent');
-  await page.screenshot({ path: 'test-results/inline-folder-desktop.png' });
+  await page.screenshot({ path: 'test-results/inline-parent-desktop.png' });
   await name.press('Enter');
   await expect(page.locator('.breadcrumb-parent')).toContainText('Renamed parent');
   expect(await canvas!.evaluate((element) => element.isConnected)).toBe(true);
@@ -517,7 +519,7 @@ test('renaming an open parent folder retains the editor, saves to the new path a
     .toBe(0);
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Before folder rename', exact: true }),
+    page.getByRole('heading', { name: 'Before parent rename', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Forward', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Child', exact: true })).toBeVisible();

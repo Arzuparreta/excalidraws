@@ -169,8 +169,8 @@ icon that read as filters, and visit-history arrows in the sidebar that acted on
 editor. Row rename pencils followed each name's length, and selection mode moved every
 name to the right. The controls now follow one order, from most to least frequent:
 
-- Creation is one split control: New canvas, plus a menu with New folder and
-  Import. A folder's `+` opens the same kind of menu for that folder.
+- Creation is one split control: New canvas, plus a menu with Import. A row's `+`
+  opens New canvas inside and Import inside for that canvas.
 - Library and Favorites are a labeled two-option switch. Archive and Trash are labeled
   footer buttons beside an icon-only Settings button. Opening Archive or Trash shows
   the view name with a Back to Library button in the list header.
@@ -183,16 +183,49 @@ name to the right. The controls now follow one order, from most to least frequen
 - Touch actions buttons are dimmed except on the current or selected row, keeping a
   contrast of at least 3:1.
 
+## Canvases inside canvases
+
+Organizing canvases in folders kept producing a separate canvas whose only job was to
+list a folder's canvases, and folders that did not match what their index canvas listed.
+Folders are now gone from the model: every item is a canvas, and any canvas can contain
+canvases. Containing others is a state of a canvas, not a second kind of item.
+
+- Words: only "canvas" and "inside". Actions read New canvas inside, Import inside,
+  and Move to… with canvases as destinations. No separate name such as board or hub,
+  which would reintroduce a second kind of item.
+- Rows: one icon for every canvas. A chevron and a muted count of the canvases
+  directly inside appear only when there are any; the count gives way to the row
+  actions on hover. Clicking a row always opens it; the chevron only expands or
+  collapses. Dropping on the middle of any row moves into that canvas.
+- Links: the topbar Link to canvas dialog links the selection to a canvas, or adds a
+  linked label. Its first option creates a canvas inside the open one, named after the
+  selected text, without leaving the drawing. Rows dragged onto the drawing become
+  linked labels. Following a link opens the canvas in the workspace; a link to a canvas
+  that no longer exists names it in an error instead of opening a blank page.
+- Consistency: when the drawing does not link to some canvases inside it, a topbar
+  count (`2 not linked`) lists them with Add link, Open, and Add all as a list. This is
+  the check that a parent canvas and its contents describe the same things.
+- Context: the topbar names up to two containing canvases, each one opening it, with
+  an ellipsis that shows the full location in the explorer.
+- Storage stays readable outside the workspace: `Ideas.excalidraw` plus the folder
+  `Ideas/` for its contents, which exists only while it has contents. Rejected
+  alternatives: an `index.excalidraw` inside each folder (turning a canvas into a
+  container would move its file, and every container would be called index) and
+  nesting recorded only in metadata (the files would lose their structure).
+- Moving or renaming a canvas rewrites relative links to it in other canvases. The open
+  canvas is excluded on the service and updated in the editor without an undo step,
+  so neither a dirty drawing nor its history is replaced.
+
 ## Acceptance
 
 - Opening a document keeps its row in place and mounts only one editor.
 - Rename, move, archive, favorite, and reorder preserve the active editor instance.
 - No centered application dialog remains; destructive local discard is confirmed
   beside its warning. Menus fit and stay attached through scroll and resize.
-- Move into/out of folders, custom order, archive/unarchive, selection, duplicate,
+- Move into/out of canvases, custom order, archive/unarchive, selection, duplicate,
   trash/Undo, and restore work without drag and on touch.
 - Metadata survives restart, updates another client, and leaves scenes untouched.
-- History survives file and ancestor-folder moves. Restore handles missing parents
+- History survives canvas and ancestor-canvas moves. Restore handles missing parents
   and name reuse without replacing existing documents.
 - Verify 320/390 px phones, landscape, portrait tablet, 1024 px, and wide desktop;
   inspect rendered UI as well as geometry and behavior. State physical Safari

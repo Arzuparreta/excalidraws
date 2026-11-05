@@ -18,29 +18,42 @@ not maintain an editor fork or provide an installable plugin for excalidraw.com.
 - Settings, the gear at the bottom right of the sidebar, offers System, Light, and Dark
   themes. System is the default and follows appearance changes immediately. A manual
   choice applies to the workspace and editor and is remembered in this browser.
-- The Library keeps every canvas in its folder, including the one you are drawing on.
-  Search by name or path; archived matches carry an Archive badge. Favorites provides
-  quick access without moving files. Recent changes, Name, and Custom order are available.
-- New canvas creates at the top level; the arrow beside it offers New folder and Import.
-  Use a folder's own `+` action to create inside it. Default names are unique, including
-  when another client creates an item first. New folders offer inline naming immediately;
-  Escape keeps the default.
+- Every item in the Library is a canvas, and any canvas can contain other canvases. A
+  canvas with canvases inside it is still drawn on like any other. Its row shows a chevron
+  to expand or collapse what is inside and the number of canvases directly inside it.
+  Clicking a row always opens that canvas. Search by name or path; archived matches carry
+  an Archive badge. Favorites provides quick access without moving files. Recent changes,
+  Name, and Custom order are available.
+- New canvas creates at the top level; the arrow beside it offers Import. A row's `+`
+  button, its `…` menu, and the topbar `…` menu offer New canvas inside and Import inside.
+  Default names are unique, including when another client creates an item first.
+- Links connect canvases. Link to canvas, the link button in the topbar, links the
+  selected elements to a canvas, or adds a label that links to it when nothing is selected.
+  Its first option, New canvas “…” inside, creates a canvas inside the open one, named
+  after the selected text, and links the selection to it without leaving the drawing.
+  Dragging rows from the explorer onto the drawing adds linked labels on desktop. Following
+  a link opens that canvas in the workspace. When a canvas has canvases inside it that its
+  drawing does not link to, the topbar shows how many (`2 not linked`); that list adds a
+  link to each one or to all of them.
+- The topbar names the canvases that contain the open one; each name opens that canvas.
 - Click the canvas title to rename it. In the explorer, press F2 on a row or choose
   Rename from its `…` menu. Enter or the checkmark saves, Escape cancels, and leaving the
   field saves. A single draft keeps the header and row name synchronized without changing
   the file per keystroke.
-- The `…` menu and right-click provide contextual actions. Move uses a searchable folder
-  picker with a top-level destination and a move-out shortcut. Desktop dragging moves
-  into folders; Custom order also supports insertion between rows. Move up/down and
-  keyboard controls provide alternatives to dragging.
-- Select several items to move, archive, or trash them together. Selecting a folder already
-  includes its contents. Duplicate makes a separate canvas, including for inactive files.
+- The `…` menu and right-click provide contextual actions. Move uses a searchable canvas
+  picker with a top-level destination and a move-out shortcut. Desktop dragging onto the
+  middle of a row moves into that canvas; Custom order also supports insertion between rows.
+  Move up/down and keyboard controls provide alternatives to dragging. Moving, renaming,
+  archiving, or trashing a canvas includes the canvases inside it. Links to a moved or
+  renamed canvas are updated in every canvas that contains them.
+- Select several items to move, archive, or trash them together. Selecting a canvas already
+  includes the canvases inside it. Duplicate copies only that canvas's drawing.
 - Archive hides completed work without changing its file path. Open Archive from the
   explorer footer to bring it back; Back to Library returns to the tree. An archived
   canvas can remain open and editable. Favorites, archive, and custom order are shared
   between devices through private workspace metadata.
 - Sending an item to Trash is immediate and offers Undo. Trash, in the explorer footer,
-  stays inside the explorer; restore recreates missing parent folders and chooses a free
+  stays inside the explorer; restore recreates missing containing canvases and chooses a free
   name if the original is occupied. No existing file is replaced. Moves, archive changes, and custom order also
   offer Undo. Dismissing Undo does not remove items from Trash.
 - The explorer supports keyboard navigation, F2 to rename, and contextual-menu keys.
@@ -59,7 +72,7 @@ not maintain an editor fork or provide an installable plugin for excalidraw.com.
   and ordering preserve the active editor, viewport, and drawing undo/redo history.
 - Drawings include embedded images and retain scroll position and zoom. Import one or more
   `.excalidraw` files without replacing existing files, or download a canvas.
-- Version history retains the last 20 previous versions and follows file and folder moves.
+- Version history retains the last 20 previous versions and follows canvas moves.
   Restoring a version creates a separate canvas with a readable name.
 - External changes reload automatically when the editor is clean. With local edits, a
   conflict offers Save a copy, Download, or Load from server. Discarding the local version
@@ -187,7 +200,17 @@ for a consistent backup. When restoring with the service stopped, remove
 Do not share the vault between multiple servers or let untrusted users edit its contents.
 The lock prevents two local service instances; it does not coordinate multiple hosts over NFS.
 
-Moving or renaming files and folders carries their saved history and workspace metadata
+On disk, the canvas `Ideas.excalidraw` keeps the canvases inside it in the folder `Ideas/`
+next to it, for example `Ideas/Idea A.excalidraw`. That folder exists only while the canvas
+contains canvases. A folder without a matching `.excalidraw` file, such as one created
+outside the workspace or by an earlier version, is shown as an empty canvas; its file is
+written the first time it is saved. Links between canvases are element links of the form
+`/?canvas=Ideas/Idea%20A.excalidraw`. Moving or renaming a canvas rewrites those links in
+the other canvases right after the move, before any later save, and keeps the previous
+version of each rewritten file in its history;
+links written as absolute URLs are not rewritten.
+
+Moving or renaming canvases carries their saved history and workspace metadata
 to the new path. Trash records retain both, and restore reattaches them at the final path.
 Private `.workspace/library.json` stores favorites, archive flags, and sibling order; it
 does not change document bytes or modification times.

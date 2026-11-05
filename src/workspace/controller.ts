@@ -1,29 +1,34 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Document, Entry, HistoryEntry, Scene, TrashEntry } from '../../shared/model';
-import type { EditorHandle } from '../editor/ExcalidrawAdapter';
+import type { EditorHandle, EditorState, ViewportPoint } from '../editor/ExcalidrawAdapter';
+import {
+  EXTENSION,
+  canvasLink,
+  canvasName,
+  folderCanvas,
+  inCanvas,
+  outermost,
+  parentCanvas,
+  relocated,
+  relocatedLink,
+} from '../../shared/canvas';
 import { api, ApiError } from './api';
 import { drafts } from './drafts';
 import { DocumentSession, type SaveState } from './session';
 
 export const basename = (path: string) => path.split('/').at(-1)!;
-export const title = (path: string) => basename(path).replace(/\.excalidraw$/, '');
+export const title = canvasName;
+/** The content folder that contains a canvas ('' is the top level). Siblings share it. */
 export const parent = (path: string) =>
   path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 const join = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);
-/** True when path is root itself or inside it. The vault root ('') contains nothing here. */
-export const within = (path: string, root: string) =>
-  !!root && (path === root || path.startsWith(`${root}/`));
-/** Removes duplicates and paths already covered by a selected ancestor folder. */
-export const topLevel = (paths: string[]) => {
-  const unique = [...new Set(paths.filter(Boolean))];
-  return unique.filter((path) => !unique.some((other) => other !== path && within(path, other)));
-};
-export const pathWithName = (entry: Pick<Entry, 'path' | 'kind'>, name: string) => {
+/** True when the canvas `path` is `root` or inside it. Nothing is inside ''. */
+export const within = inCanvas;
+/** Removes duplicates and canvases already included by a selected ancestor. */
+export const topLevel = (paths: string[]) => outermost(paths);
+export const pathWithName = (entry: Pick<Entry, 'path'>, name: string) => {
   const trimmed = name.trim();
-  return join(
-    parent(entry.path),
-    entry.kind === 'file' && !trimmed.endsWith('.excalidraw') ? `${trimmed}.excalidraw` : trimmed,
-  );
+  return join(parent(entry.path), trimmed.endsWith(EXTENSION) ? trimmed : `${trimmed}${EXTENSION}`);
 };
 export const readSetting = (key: string) => {
   try {
@@ -43,10 +48,24 @@ const emptyState: SaveState = { status: 'saved', dirty: false, message: '', loca
 const departError = 'Save or resolve the current canvas before opening another one.';
 const messageOf = (error: unknown, fallback = 'The operation could not be completed.') =>
   error instanceof Error && error.message ? error.message : fallback;
-const translate = (path: string, from: string, to: string) =>
-  within(path, from) ? to + path.slice(from.length) : path;
+const translate = relocated;
+/** A usable canvas name from free text, such as a label selected in the drawing. */
+const canvasNameFrom = (value: unknown) =>
+  typeof value === 'string'
+    ? value
+        .replace(/[\x00-\x1f\x7f]+/g, ' ')
+        .replace(/[/\\]/g, '-')
+        .replace(/\.excalidraw$/i, '')
+        .replace(/^[\s.]+/, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 120)
+        .trim()
+    : '';
 const displayName = (path: string) => title(path);
+/** Name of the canvas that owns a content folder, quoted; the top level is the Library. */
 const folderLabel = (folder: string) => (folder ? `"${basename(folder)}"` : 'Library');
+const inside = (count: number) =>
+  count ? ` and ${count === 1 ? 'the canvas' : `${count} canvases`} inside it` : '';
 const quoted = (paths: string[], noun = 'items') =>
   paths.length === 1 ? `"${displayName(paths[0])}"` : `${paths.length} ${noun}`;
 const sameEntry = (a: Entry, b: Entry) => {
@@ -127,6 +146,7 @@ export function createWorkspace() {
   const [documentPath, setDocumentPath] = createSignal('');
   const [saveState, setState] = createSignal<SaveState>(emptyState);
   const [editorPending, setEditorPending] = createSignal(false);
+  const [editorState, setEditorState] = createSignal<EditorState>();
   const state = createMemo<SaveState>(() =>
     editorPending()
       ? {
@@ -196,7 +216,8 @@ export function createWorkspace() {
     return tree;
   };
   const entry = (path: string) => entries().find((item) => item.path === path);
-  const isFolder = (path: string) => !path || entry(path)?.kind === 'folder';
+  /** Whether the canvas that owns a content folder exists ('' is the top level). */
+  const isFolder = (folder: string) => !folder || !!entry(folderCanvas(folder));
   const affectsActive = (path: string) => within(session()?.document.path ?? '', path);
   const mount = async (document: Document, allowed = () => true, missing = false) => {
     const draft = await drafts.read(document.path).catch(() => undefined);
@@ -408,7 +429,7 @@ export function createWorkspace() {
     const value = navigation();
     let index = value.index + direction;
     while (index >= 0 && index < value.paths.length) {
-      if (entry(value.paths[index])?.kind === 'file') return index;
+      if (entry(value.paths[index])) return index;
       index += direction;
     }
     return -1;
@@ -429,8 +450,11 @@ export function createWorkspace() {
     const path = current?.document.path;
     const affected = !!current && !!path && within(path, from);
     const resume = affected ? current.pauseSaving() : undefined;
+    // The server rewrites links to the moved canvas in every other canvas. The open one
+    // is updated in the editor instead, so its unsaved drawing is never replaced.
+    const exclude = editor && current ? current.document.path : undefined;
     try {
-      await api.move(from, to);
+      await api.move(from, to, exclude);
       const index = navigation().index;
       batch(() => {
         const name = renaming();
@@ -466,16 +490,13 @@ export function createWorkspace() {
     } finally {
       resume?.();
     }
+    if (exclude) editor?.rewriteLinks((link) => relocatedLink(link, from, to));
   };
 
   const startRename = (path: string) => {
     const item = entry(path);
     if (!item) return;
-    setRenaming({
-      path,
-      name: item.kind === 'file' ? title(path) : basename(path),
-      error: '',
-    });
+    setRenaming({ path, name: title(path), error: '' });
   };
   const cancelRename = () => {
     if (renameFlight && renameFlight.value === renaming()) return;
@@ -532,16 +553,15 @@ export function createWorkspace() {
   const createUnique = async (
     folder: string,
     name: (attempt: number) => string,
-    kind: Entry['kind'],
     scene?: Scene,
   ): Promise<Created> => {
     const occupied = new Set(entries().map((item) => item.path));
     for (let attempt = 0; attempt < 1000 && !disposed; attempt++) {
       const base = name(attempt);
-      const path = join(folder, kind === 'file' ? `${base}.excalidraw` : base);
+      const path = join(folder, `${base}${EXTENSION}`);
       if (occupied.has(path)) continue;
       try {
-        return { path, name: base, document: await api.create(path, kind, scene) };
+        return { path, name: base, document: await api.create(path, scene) };
       } catch (e) {
         // Another client may have claimed this name since the tree was read.
         if (!(e instanceof ApiError) || e.code !== 'exists') throw e;
@@ -551,6 +571,46 @@ export function createWorkspace() {
     throw new Error('Could not find an available name.');
   };
   const numbered = (base: string) => (attempt: number) => (attempt ? `${base} (${attempt})` : base);
+
+  // Links between canvases. The open editor owns the drawing; these only change its scene.
+  const linkLabel = (path: string) => ({ label: title(path), link: canvasLink(path) });
+  /** Links the selected elements to a canvas. */
+  const linkSelection = (path: string) => {
+    if (!editor?.linkSelection(canvasLink(path))) return false;
+    setAnnouncement(`Linked the selection to ${title(path)}.`);
+    return true;
+  };
+  /** Adds labels that link to canvases: at a viewport point, or centered in view. */
+  const insertLinks = (paths: string[], point?: ViewportPoint) => {
+    if (!paths.length || !editor?.insertLinks(paths.map(linkLabel), point)) return false;
+    setAnnouncement(
+      paths.length === 1 ? `Added a link to ${title(paths[0]!)}.` : `Added ${paths.length} links.`,
+    );
+    return true;
+  };
+  /**
+   * Creates a canvas inside the open one without leaving it, and links the selection to
+   * it, or adds a label that links to it.
+   */
+  const createLinked = (name?: string) => {
+    const current = session();
+    if (!current) return Promise.resolve(undefined);
+    const owner = current.document.path;
+    return enqueue(async () => {
+      const base = canvasNameFrom(name) || 'Untitled canvas';
+      const folder = owner.slice(0, -EXTENSION.length);
+      if (!entry(owner)) throw new Error('Save this canvas before adding canvases inside it.');
+      const created = await createUnique(folder, numbered(base));
+      await refresh();
+      if (session()?.document.path === owner) {
+        const selected = (editorState()?.selection.count ?? 0) > 0;
+        if (selected) editor?.linkSelection(canvasLink(created.path));
+        else editor?.insertLinks([linkLabel(created.path)]);
+      }
+      setAnnouncement(`Created ${created.name} inside ${title(owner)} and linked it.`);
+      return created.path;
+    }, [owner]);
+  };
   // Opens a canvas that an operation just created, if the current one can be left.
   const openCreated = async (created: Created, message: string) => {
     setOperationTarget(created.path);
@@ -563,24 +623,24 @@ export function createWorkspace() {
     return true;
   };
 
-  const create = (kind: Entry['kind'], folder: unknown = '', name?: unknown) => {
+  /** Creates a canvas inside the canvas that owns `folder` ('' is the top level), and opens it. */
+  const create = (folder: unknown = '', name?: unknown) => {
     const destination = typeof folder === 'string' ? folder : '';
     return enqueue(async () => {
-      const given = typeof name === 'string' ? name.trim().replace(/\.excalidraw$/, '') : '';
-      const base = given || (kind === 'file' ? 'Untitled canvas' : 'Untitled folder');
-      if (/[/\\]/.test(base)) throw new Error('Names cannot contain slashes.');
-      if (!isFolder(destination)) throw new Error('The destination folder is no longer available.');
-      if (kind === 'file') {
-        setOperationTarget(join(destination, `${base}.excalidraw`));
-        if (!(await ensureSaved())) throw new Error(departError);
-      }
-      const created = await createUnique(destination, numbered(base), kind);
-      if (kind === 'file' && (await mount(created.document))) visit(created.path, 'push');
+      const base = canvasNameFrom(name) || 'Untitled canvas';
+      if (!isFolder(destination)) throw new Error('The destination canvas is no longer available.');
+      setOperationTarget(join(destination, `${base}${EXTENSION}`));
+      if (!(await ensureSaved())) throw new Error(departError);
+      const created = await createUnique(destination, numbered(base));
+      if (await mount(created.document)) visit(created.path, 'push');
       await refresh();
-      if (kind === 'folder') setRenaming({ path: created.path, name: created.name, error: '' });
-      setAnnouncement(`Created ${created.name}.`);
+      setAnnouncement(
+        destination
+          ? `Created ${created.name} inside ${basename(destination)}.`
+          : `Created ${created.name}.`,
+      );
       return created.path;
-    }, [destination]);
+    }, [folderCanvas(destination)]);
   };
 
   const moveAll = async (moves: Relocation[]) => {
@@ -595,7 +655,7 @@ export function createWorkspace() {
       } catch (e) {
         failures.push(
           e instanceof ApiError && e.code === 'exists'
-            ? `"${basename(to)}" already exists in ${folderLabel(parent(to))}.`
+            ? `"${title(to)}" already exists in ${folderLabel(parent(to))}.`
             : `"${displayName(from)}": ${messageOf(e)}`,
         );
       }
@@ -609,7 +669,7 @@ export function createWorkspace() {
   ) => {
     const sources = topLevel(paths);
     return enqueue(async () => {
-      if (!isFolder(folder)) throw new Error('The destination folder is no longer available.');
+      if (!isFolder(folder)) throw new Error('The destination canvas is no longer available.');
       const previousOrders = new Map(
         [...new Set([folder, ...sources.map(parent)])].map((location) => [
           location,
@@ -626,7 +686,7 @@ export function createWorkspace() {
       const failures: string[] = [];
       for (const from of sources) {
         if (!entry(from)) failures.push(`"${displayName(from)}" is no longer available.`);
-        else if (within(folder, from))
+        else if (within(folderCanvas(folder), from))
           failures.push(`"${displayName(from)}" cannot be moved inside itself.`);
         else if (parent(from) === folder) result.push(from);
         else moves.push({ from, to: join(folder, basename(from)) });
@@ -725,7 +785,7 @@ export function createWorkspace() {
           const item = items.get(path);
           if (!item?.archived) continue;
           if (item.archiveRoot) roots.add(item.archiveRoot);
-          for (let current = path; current; current = parent(current))
+          for (let current = path; current; current = parentCanvas(current))
             if (explicit(current)) roots.add(current);
         }
         targets = [...roots];
@@ -769,7 +829,7 @@ export function createWorkspace() {
         saved = await ensureSaved();
         scene = current.getScene();
       } else {
-        if (entry(path)?.kind !== 'file') throw new Error('Only canvases can be duplicated.');
+        if (!entry(path)) throw new Error('This canvas is no longer available.');
         scene = (await api.read(path)).scene;
       }
       const folder = isFolder(parent(path)) ? parent(path) : '';
@@ -777,7 +837,6 @@ export function createWorkspace() {
       const created = await createUnique(
         folder,
         (attempt) => `${base} (copy${attempt ? ` ${attempt + 1}` : ''})`,
-        'file',
         scene,
       );
       if (current && active && session() === current) {
@@ -846,7 +905,12 @@ export function createWorkspace() {
       if (trash() !== undefined) setTrash(await api.listTrash());
       if (items.length)
         setNotice(
-          `Moved ${quoted(items.map((item) => item.path))} to Trash.`,
+          items.length === 1
+            ? `Moved ${quoted([items[0]!.path])}${inside(items[0]!.inside)} to Trash.`
+            : `Moved ${quoted(
+                items.map((item) => item.path),
+                'canvases',
+              )} to Trash.`,
           items.map((item) => item.path),
           () => restoreItems(items, activeTrashed),
         );
@@ -939,7 +1003,7 @@ export function createWorkspace() {
     const imported = Array.from(files);
     if (importInput) importInput.value = '';
     return enqueue(async () => {
-      if (!isFolder(destination)) throw new Error('The destination folder is no longer available.');
+      if (!isFolder(destination)) throw new Error('The destination canvas is no longer available.');
       const { importScene } = await import('../editor/ExcalidrawAdapter');
       const failures: string[] = [];
       let last: Created | undefined;
@@ -953,7 +1017,7 @@ export function createWorkspace() {
               .replace(/\.excalidraw$|\.json$/g, '')
               .replace(/[/\\]/g, '-')
               .trim() || 'Imported canvas';
-          last = await createUnique(destination, numbered(original), 'file', scene);
+          last = await createUnique(destination, numbered(original), scene);
           count++;
         } catch (e) {
           failures.push(`"${file.name}": ${messageOf(e)}`);
@@ -988,7 +1052,6 @@ export function createWorkspace() {
       const created = await createUnique(
         folder,
         (attempt) => `${base} (restored${attempt ? ` ${attempt + 1}` : ''})`,
-        'file',
         scene,
       );
       setHistory(undefined);
@@ -1010,7 +1073,7 @@ export function createWorkspace() {
   onMount(() => {
     void enqueue(async () => {
       const tree = await refresh();
-      const files = new Set(tree.filter((e) => e.kind === 'file').map((e) => e.path));
+      const files = new Set(tree.map((e) => e.path));
       const linked = linkedCanvas();
       const last = readSetting('last') ?? '';
       let opened = '';
@@ -1041,7 +1104,7 @@ export function createWorkspace() {
         }
       }
       if (!opened) {
-        const first = tree.find((e) => e.kind === 'file' && !e.archived);
+        const first = tree.find((e) => !e.archived);
         if (first && (await mount(await api.read(first.path)))) opened = first.path;
       }
       setNavigation(opened ? { paths: [opened], index: 0 } : { paths: [], index: -1 });
@@ -1144,7 +1207,6 @@ export function createWorkspace() {
     setReloadConfirm,
     switchTarget,
     canNavigate,
-    folders: createMemo(() => entries().filter((e) => e.kind === 'folder')),
     open,
     navigate,
     create,
@@ -1168,10 +1230,17 @@ export function createWorkspace() {
       enqueue(async () => {
         await refresh();
       }).then(() => undefined),
+    /** Whether a viewport point is over the open editor's drawing area. */
+    pointInEditor: (point: ViewportPoint) => !!editor?.contains(point),
     setEditor: (handle: EditorHandle | undefined) => {
       editor = handle;
     },
     setEditorPending,
+    editorState,
+    setEditorState,
+    linkSelection,
+    insertLinks,
+    createLinked,
     setImportInput: (input: HTMLInputElement) => {
       importInput = input;
     },
