@@ -36,6 +36,8 @@ source is forked. The shell/editor contract is `src/editor/contract.ts`, version
 version, entry, CSS, archive hash/size and every file's hash/size. The archive URL points
 to an immutable release (or defaults to `editor.json.gz` next to the manifest for local
 publishers). It contains an array of `{ path, data }` records, with base64 regular-file data.
+Editor IDs include both the file inventory and compressed archive digest, so changes in
+Node/zlib compression cannot reuse an immutable release ID.
 Limits bound download, decompression, file count and total size. Unknown, duplicate, unsafe,
 missing or modified paths reject the whole candidate. There are no package scripts at runtime.
 

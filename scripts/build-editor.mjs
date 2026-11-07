@@ -38,11 +38,12 @@ const inventory = files.map(({ path, bytes }) => ({
 const packageVersion = JSON.parse(
   await readFile('node_modules/@excalidraw/excalidraw/package.json', 'utf8'),
 ).version;
-const id = `${packageVersion}-${sha256(JSON.stringify(inventory)).slice(0, 20)}`;
 // A bounded JSON archive avoids executable installers, symlinks and tar extraction semantics.
 const archive = gzipSync(
   JSON.stringify(files.map(({ path, bytes }) => ({ path, data: bytes.toString('base64') }))),
 );
+// Compression output can change between Node/zlib releases; immutable IDs cover the payload too.
+const id = `${packageVersion}-${sha256(JSON.stringify([inventory, sha256(archive)])).slice(0, 20)}`;
 const manifest = {
   format: 1,
   contract: 1,
