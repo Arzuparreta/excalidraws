@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+      time: '07:23'
+      timezone: Europe/Madrid
+    allow:
+      - dependency-name: '@excalidraw/excalidraw'
+    versioning-strategy: increase
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps

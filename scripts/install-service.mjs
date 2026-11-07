@@ -7,6 +7,13 @@ import { fileURLToPath } from 'node:url';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
+const packaged = await readFile(path.join(repo, 'shell-release.json'), 'utf8').then(
+  () => true,
+  (error) => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  },
+);
 const option = (name, fallback) => {
   const index = args.indexOf(name);
   if (index === -1) return fallback;
@@ -228,5 +235,5 @@ if (previousUserUnit !== null) {
     console.warn('System service is healthy; reload the user manager on your next login.');
 }
 console.log(
-  `Installed: http://${host}:${port}\nVault: ${vault}\nCheckout: ${repo}\nThe service rebuilds this checkout on every start.${previous !== null ? `\nPrevious unit: ${backup}` : ''}`,
+  `Installed: http://${host}:${port}\nVault: ${vault}\nCheckout: ${repo}\n${packaged ? 'The service runs the prebuilt shell; the editor downloads on first use.' : 'The service rebuilds this checkout on every start.'}${previous !== null ? `\nPrevious unit: ${backup}` : ''}`,
 );

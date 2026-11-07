@@ -18,6 +18,11 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run format:check
       - run: npm run check
+      - run: node scripts/package-shell.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: excalidraws-shell
+          path: dist/excalidraws-shell.tar.gz
       - run: npm audit --audit-level=high
       - uses: actions/upload-artifact@v4
         if: failure()

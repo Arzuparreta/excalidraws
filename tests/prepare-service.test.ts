@@ -159,3 +159,26 @@ test('a failed dependency installation does not run the build', async (t) => {
   assert.doesNotMatch(result.stdout, /Building Excalidraws/);
   assert.equal(await built(), '<main>First version</main>');
 });
+
+test('a packaged shell installs only production dependencies and never builds or fetches the editor', async (t) => {
+  const { checkout, vault, run } = await fixture(t);
+  await fs.writeFile(path.join(checkout, 'shell-release.json'), '{"format":1}');
+  await fs.mkdir(path.join(checkout, 'dist/client'), { recursive: true });
+  await fs.mkdir(path.join(checkout, 'dist/server'), { recursive: true });
+  await fs.writeFile(path.join(checkout, 'dist/client/index.html'), '<main>Prebuilt shell</main>');
+  await fs.writeFile(path.join(checkout, 'dist/server/main.js'), '// Prebuilt server');
+  await fs.writeFile(path.join(checkout, 'source.txt'), 'Broken build');
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Prepared shell distribution/);
+  assert.doesNotMatch(result.stdout, /Building Excalidraws/);
+  await assert.rejects(fs.access(path.join(checkout, 'node_modules/build-tool')));
+  assert.equal(
+    await fs.readFile(path.join(checkout, 'dist/client/index.html'), 'utf8'),
+    '<main>Prebuilt shell</main>',
+  );
+  assert.equal(
+    await fs.readFile(path.join(vault, 'Drawing.excalidraw'), 'utf8'),
+    'Existing user drawing',
+  );
+});

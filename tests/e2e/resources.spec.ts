@@ -15,7 +15,7 @@ async function ready(page: Page) {
 test('the empty Solid workspace loads without downloading the editor runtime', async ({ page }) => {
   const editorRequests: string[] = [];
   page.on('request', (request) => {
-    if (/ExcalidrawAdapter.*\.(js|css)/.test(request.url())) editorRequests.push(request.url());
+    if (/\/(api\/editor|editor\/)/.test(request.url())) editorRequests.push(request.url());
   });
   await page.route('**/api/entries', (route) => route.fulfill({ json: [] }));
   await page.goto('/');

@@ -5,13 +5,35 @@ Each canvas is an independent `.excalidraw` file: edit it in your browser, open 
 in Excalidraw, or include its folder in your backups.
 
 The workspace is built with Solid.js and Vite. The official React editor is an isolated,
-lazy-loaded component; React does not render the sidebar, navigation, or contextual surfaces.
+separately downloaded component; React does not render the sidebar, navigation, or contextual surfaces.
 
-The integration uses `@excalidraw/excalidraw` and its public API. The editor remains
-a dependency; this repository adds document management and a file service. It does
+The integration uses `@excalidraw/excalidraw` and its public API. The shell automatically downloads and caches a tested official editor when a canvas is
+first opened or imported. Compatible updates download in the background and take effect
+on a later page load. Cached editors work without access to the download host. This
+repository adds document management and a file service. It does
 not maintain an editor fork or provide an installable plugin for excalidraw.com.
 
+The shell build excludes Excalidraw, React, and editor fonts. First use needs internet
+access from the server; no package installation or build is required from the user.
+See [editor updates](docs/editor-updates.md) for the architecture, CI publication,
+cache configuration, trust model, and maintenance plan.
+
 ![Excalidraws in dark mode with the canvas explorer and a canvas containing three basic shapes](docs/screenshots/workspace.png)
+
+## Shell distribution
+
+Download the `excalidraws-shell` artifact from a successful Workspace checks run and
+extract `excalidraws-shell.tar.gz` into a permanent directory. With Node.js and npm
+installed, run the existing service installer from that directory:
+
+```sh
+sudo node scripts/install-service.mjs --service-user YOUR_USER --port 3000
+```
+
+The selected account must own the extracted directory. The installer automatically installs
+only server dependencies, starts the prebuilt shell, and preserves a separate vault.
+The editor downloads on first use. Source checkouts still support the development and
+build commands below; they install editor build dependencies for maintainers.
 
 ## Usage
 
