@@ -13,5 +13,5 @@
     "esModuleInterop": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "shared", "vite.config.ts"]
+  "include": ["src", "shared", "vite.config.ts", "vite.editor.config.ts"]
 }

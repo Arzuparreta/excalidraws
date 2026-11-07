@@ -1,0 +1,43 @@
+name: Publish compatible editor
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/editor/**'
+      - 'shared/**'
+      - 'package*.json'
+      - 'vite.editor.config.ts'
+      - 'scripts/build-editor.mjs'
+      - 'scripts/publish-editor.mjs'
+      - 'docs/licenses/**'
+      - '.github/workflows/editor.yml'
+permissions:
+  contents: write
+concurrency:
+  group: editor-channel-v1
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run format:check
+      - run: npm run check
+      - run: npm audit --audit-level=high
+      - run: node scripts/publish-editor.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: editor-publication-evidence
+          path: test-results/

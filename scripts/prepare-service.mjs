@@ -17,6 +17,8 @@ const optionalRead = async (file) =>
     throw error;
   });
 
+const packaged = (await optionalRead(path.join(repo, 'shell-release.json'))) !== '';
+
 async function fingerprint() {
   const files = await Promise.all([
     readFile(path.join(repo, 'package.json'), 'utf8'),
@@ -24,7 +26,7 @@ async function fingerprint() {
     optionalRead(path.join(repo, 'node_modules/.package-lock.json')),
   ]);
   return createHash('sha256')
-    .update(JSON.stringify([process.version, process.platform, process.arch, ...files]))
+    .update(JSON.stringify([process.version, process.platform, process.arch, packaged, ...files]))
     .digest('hex');
 }
 
@@ -36,13 +38,29 @@ function npm(args) {
 
 try {
   if ((await optionalRead(marker)) !== (await fingerprint())) {
-    console.log('Synchronizing service dependencies, including the build tools…');
-    npm(['ci', '--include=dev', '--no-audit', '--no-fund']);
+    console.log(
+      packaged
+        ? 'Synchronizing server dependencies…'
+        : 'Synchronizing service dependencies, including the build tools…',
+    );
+    npm([
+      'ci',
+      packaged ? '--omit=dev' : '--include=dev',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+    ]);
     await mkdir(path.dirname(marker), { recursive: true });
     await writeFile(marker, await fingerprint());
   }
-  console.log(`Building Excalidraws from ${repo}…`);
-  npm(['run', 'build']);
+  if (packaged) {
+    await readFile(path.join(repo, 'dist/client/index.html'));
+    await readFile(path.join(repo, 'dist/server/main.js'));
+    console.log('Prepared shell distribution; the editor downloads automatically on first use.');
+  } else {
+    console.log(`Building Excalidraws from ${repo}…`);
+    npm(['run', 'build']);
+  }
 } catch (error) {
   console.error('Service preparation failed; the server will not start.', error);
   process.exitCode = 1;

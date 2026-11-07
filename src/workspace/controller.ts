@@ -1,6 +1,7 @@
+import { loadEditor } from '../editor/loader';
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Document, Entry, HistoryEntry, Scene, TrashEntry } from '../../shared/model';
-import type { EditorHandle, EditorState, ViewportPoint } from '../editor/ExcalidrawAdapter';
+import type { EditorHandle, EditorState, ViewportPoint } from '../editor/contract';
 import {
   EXTENSION,
   canvasLink,
@@ -1004,7 +1005,7 @@ export function createWorkspace() {
     if (importInput) importInput.value = '';
     return enqueue(async () => {
       if (!isFolder(destination)) throw new Error('The destination canvas is no longer available.');
-      const { importScene } = await import('../editor/ExcalidrawAdapter');
+      const { importScene } = await loadEditor();
       const failures: string[] = [];
       let last: Created | undefined;
       let count = 0;

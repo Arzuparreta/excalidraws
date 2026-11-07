@@ -566,7 +566,16 @@ test('inline drafts synchronize between the current tree row and title without m
   await row.focus();
   await page.keyboard.press('F2');
   await input.fill('Committed name');
+  const renamed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/move' &&
+      response.request().method() === 'POST' &&
+      response.request().postDataJSON().to === 'Committed name.excalidraw',
+  );
   await input.press('Enter');
+  // The heading already shows the draft while the server rename is still in flight.
+  expect((await renamed).ok()).toBe(true);
+  await expect(input).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Committed name', exact: true })).toBeVisible();
   expect(moves).toHaveLength(1);
   expect(await canvas!.evaluate((node) => node.isConnected)).toBe(true);

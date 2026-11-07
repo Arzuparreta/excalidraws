@@ -11,8 +11,8 @@ devices. The repository started empty; the editor remains an upstream dependency
 - Solid.js renders the workspace, navigation, virtualized sidebar, and anchored popovers. Vite builds
   the application. Dependencies use exact versions and a lockfile.
 - `@excalidraw/excalidraw` remains the official React component. Only
-  `src/editor/ExcalidrawAdapter.tsx` knows its public API and React lifecycle. A lazy import
-  mounts one editor island and explicitly destroys it when switching documents.
+  `src/editor/ExcalidrawAdapter.tsx` knows its public API and React lifecycle. The shell downloads a verified editor artifact separately (see
+  [editor updates](editor-updates.md)); its module mounts one editor island and explicitly destroys it when switching documents.
 - `src/workspace`: the HTTP client, save lifecycle, and file explorer. The integration page
   simply mounts this module.
 - Node and Express serve the compiled application and a same-origin API.

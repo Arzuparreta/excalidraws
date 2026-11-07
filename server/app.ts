@@ -6,8 +6,9 @@ import os from 'node:os';
 import { sceneSchema } from '../shared/model.js';
 import { Vault, VaultError } from './vault.js';
 import { changeStream } from './changes.js';
+import { EditorManager } from './editor.js';
 
-export function createApp(vault: Vault, clientDirectory?: string) {
+export function createApp(vault: Vault, clientDirectory?: string, editors = new EditorManager()) {
   const app = express();
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
@@ -45,6 +46,31 @@ export function createApp(vault: Vault, clientDirectory?: string) {
   app.get('/api/health', (_req, res) =>
     res.json({ ok: true, application: 'excalidraws', pid: process.pid }),
   );
+  app.get('/api/editor/status', (_req, res) => res.json(editors.getStatus()));
+  app.get('/api/editor', async (req, res) => {
+    try {
+      const exclude = z.string().max(96).optional().parse(req.query.exclude);
+      res.json(await editors.location(exclude));
+    } catch {
+      res.status(503).json({
+        error: 'Could not prepare Excalidraw. Check the server connection and try again.',
+        code: 'editor_unavailable',
+      });
+    }
+  });
+  app.use('/editor', async (req, res) => {
+    const [id, ...segments] = req.path.slice(1).split('/');
+    let relative: string;
+    try {
+      relative = decodeURIComponent(segments.join('/'));
+    } catch {
+      return res.sendStatus(400);
+    }
+    const filename = await editors.asset(id, relative);
+    if (!filename) return res.sendStatus(404);
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.sendFile(filename, { dotfiles: 'allow' });
+  });
   const events = changeStream(vault.root);
   app.get('/api/events', events);
   app.get('/api/entries', async (_req, res) => res.json(await vault.list()));
